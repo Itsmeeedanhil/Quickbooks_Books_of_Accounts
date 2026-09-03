@@ -1,4 +1,4 @@
-﻿# QuickBooks Books of Accounts (Philippine BIR Compliance)
+# Books of Accounts (Philippine BIR Compliance)
 
 A high-performance desktop application built with **Tauri v2 (Rust)** and **React** designed to seamlessly bridge **Intuit QuickBooks Desktop (Enterprise / Premier / Pro)** and generate official **Bureau of Internal Revenue (BIR) Loose-Leaf Books of Accounts**.
 
@@ -15,25 +15,25 @@ A high-performance desktop application built with **Tauri v2 (Rust)** and **Reac
 - **General Ledger**: Full Chart of Accounts transaction history with hierarchical parent/sub-account grouping, running balances, and complete memo descriptions.
 
 ### 2. QuickBooks Desktop Live COM Synchronization
-- Direct integration with **QuickBooks Desktop COM Automation (QBXMLRP2)** without requiring expensive third-party plugins or manual CSV exports.
-- **Silent Background Execution**: Fast, seamless sync with CREATE_NO_WINDOW execution (no command prompts or popup windows).
+- Direct integration with **QuickBooks Desktop COM Automation (`QBXMLRP2`)** without requiring expensive third-party plugins or manual CSV exports.
+- **Silent Background Execution**: Fast, seamless sync with `CREATE_NO_WINDOW` execution (no command prompts or popup windows).
 - Automatic extraction of Company Profile, Registered Name, VAT TIN, Address, and Chart of Accounts.
 
 ### 3. Professional Exports & BIR Loose-Leaf Formats
-- **Excel Export (.xlsx) via ExcelJS**:
+- **Excel Export (`.xlsx`) via ExcelJS**:
   - Full solid grid cell borders.
   - Centered & merged BIR Company Header blocks.
-  - Real accounting number formatting (#,##0.00;(#,##0.00);"-").
+  - Real accounting number formatting (`#,##0.00;(#,##0.00);"-"`).
   - Standard double-underline bottom totals.
 - **PDF Export via jsPDF-AutoTable**:
   - Full-width A4 Landscape layout with zero margin wastage.
   - Multi-page header repetition and bottom page numbering (*"Page X of Y"*).
   - Word-wrapped descriptions and aligned monetary columns.
 - **Print / Print Preview**:
-  - Native browser printing optimized with clean @media print CSS rules.
+  - Native browser printing optimized with clean `@media print` CSS rules.
 
 ### 4. Database & Offline Support
-- Physical **Microsoft Access (.accdb)** integration via ADODB and local JSON caching for instant offline access and record persistence.
+- Physical **Microsoft Access (`.accdb`)** integration via ADODB and local JSON caching for instant offline access and record persistence.
 
 ---
 
@@ -41,8 +41,8 @@ A high-performance desktop application built with **Tauri v2 (Rust)** and **Reac
 
 - **Frontend**: React 18, Vite, Tailwind CSS, Lucide React Icons
 - **Backend / Desktop Framework**: Tauri v2, Rust
-- **Reporting & Export Engines**: exceljs, jspdf, jspdf-autotable
-- **Database / Bridge**: Windows COM Automation, Microsoft Access (.accdb), ADODB, QBXML 16.0
+- **Reporting & Export Engines**: `exceljs`, `jspdf`, `jspdf-autotable`
+- **Database / Bridge**: Windows COM Automation, Microsoft Access (`.accdb`), ADODB, QBXML 16.0
 
 ---
 
@@ -56,20 +56,20 @@ A high-performance desktop application built with **Tauri v2 (Rust)** and **Reac
 ### Installation & Development
 
 1. **Clone the repository**:
-   `ash
+   ```bash
    git clone https://github.com/Itsmeeedanhil/Quickbooks_Books_of_Accounts.git
    cd Quickbooks_Books_of_Accounts
-   `
+   ```
 
 2. **Install frontend dependencies**:
-   `ash
+   ```bash
    npm install
-   `
+   ```
 
 3. **Run in Development Mode**:
-   `ash
+   ```bash
    npm run tauri dev
-   `
+   ```
 
 ---
 
@@ -77,17 +77,17 @@ A high-performance desktop application built with **Tauri v2 (Rust)** and **Reac
 
 To compile the standalone Windows executable and installation packages:
 
-`ash
+```bash
 npm run tauri build
-`
+```
 
 Generated installer bundles will be located in:
-- **NSIS Setup Wizard (.exe)**:  
-  src-tauri/target/release/bundle/nsis/QuickBooks Books of Accounts_1.0.0_x64-setup.exe
-- **MSI Windows Installer (.msi)**:  
-  src-tauri/target/release/bundle/msi/QuickBooks Books of Accounts_1.0.0_x64_en-US.msi
-- **Portable Executable (.exe)**:  
-  src-tauri/target/release/books-of-account-program.exe
+- **NSIS Setup Wizard (`.exe`)**:  
+  `src-tauri/target/release/bundle/nsis/Books of Accounts_1.0.0_x64-setup.exe`
+- **MSI Windows Installer (`.msi`)**:  
+  `src-tauri/target/release/bundle/msi/Books of Accounts_1.0.0_x64_en-US.msi`
+- **Portable Executable (`.exe`)**:  
+  `src-tauri/target/release/books-of-account-program.exe`
 
 ---
 
