@@ -1178,6 +1178,7 @@ impl QbXmlParser {
     pub fn parse_cash_disbursements_journal(xml: &str, period_ended: &str) -> Vec<CashDisbursementsJournalEntry> {
         let mut entries = Vec::new();
 
+        // 1. Standard Checks (<CheckRet>)
         let chk_chunks: Vec<&str> = xml.split("<CheckRet>").skip(1).collect();
         for chunk in chk_chunks {
             let end_idx = chunk.find("</CheckRet>").unwrap_or(chunk.len());
@@ -1197,12 +1198,156 @@ impl QbXmlParser {
 
             let memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_else(|| "Disbursement / Payment".to_string());
 
-            let gross_amount: f64 = Self::extract_tag_value(item_xml, "Amount")
+            let total_check_amt: f64 = Self::extract_tag_value(item_xml, "Amount")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
 
-            let withholding_tax = 0.0;
-            let net_disbursement = gross_amount;
+            let mut gross_lines = 0.0;
+            let mut line_wtax = 0.0;
+
+            // Scan Expense lines
+            let exp_chunks: Vec<&str> = item_xml.split("<ExpenseLineRet>").skip(1).collect();
+            for e_chunk in exp_chunks {
+                let end_e = e_chunk.find("</ExpenseLineRet>").unwrap_or(e_chunk.len());
+                let exp_xml = &e_chunk[..end_e];
+
+                let acct_name = Self::extract_nested_tag(exp_xml, "AccountRef", "FullName").unwrap_or_default();
+                let exp_memo = Self::extract_tag_value(exp_xml, "Memo").unwrap_or_default();
+                let exp_amt: f64 = Self::extract_tag_value(exp_xml, "Amount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                let is_wtax = acct_name.to_lowercase().contains("withholding")
+                    || acct_name.to_lowercase().contains("wtax")
+                    || acct_name.to_lowercase().contains("cwt")
+                    || acct_name.contains("16420")
+                    || exp_memo.to_lowercase().contains("withholding tax")
+                    || exp_amt < 0.0;
+
+                if is_wtax {
+                    line_wtax += exp_amt.abs();
+                } else {
+                    gross_lines += exp_amt;
+                }
+            }
+
+            // Scan Item lines
+            let item_chunks: Vec<&str> = item_xml.split("<ItemLineRet>").skip(1).collect();
+            for i_chunk in item_chunks {
+                let end_i = i_chunk.find("</ItemLineRet>").unwrap_or(i_chunk.len());
+                let line_xml = &i_chunk[..end_i];
+
+                let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
+                let desc = Self::extract_tag_value(line_xml, "Desc").unwrap_or_default();
+                let line_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                let is_wtax = item_name.to_lowercase().contains("withholding")
+                    || desc.to_lowercase().contains("withholding tax")
+                    || line_amt < 0.0;
+
+                if is_wtax {
+                    line_wtax += line_amt.abs();
+                } else {
+                    gross_lines += line_amt;
+                }
+            }
+
+            // Check if this check transaction itself is a Withholding Tax check
+            let is_direct_wtax_check = memo.to_lowercase().contains("withholding tax")
+                || memo.to_lowercase().contains("(withholding tax)")
+                || payee_name.to_lowercase().contains("withholding")
+                || payee_name.to_lowercase().contains("bureau of internal revenue");
+
+            let withholding_tax = if line_wtax > 0.0 {
+                ((line_wtax) * 100.0).round() / 100.0
+            } else if is_direct_wtax_check {
+                total_check_amt
+            } else {
+                0.0
+            };
+
+            let gross_amount = if gross_lines > 0.0 {
+                ((gross_lines) * 100.0).round() / 100.0
+            } else if line_wtax > 0.0 {
+                ((total_check_amt + line_wtax) * 100.0).round() / 100.0
+            } else {
+                total_check_amt
+            };
+
+            let net_disbursement = total_check_amt;
+
+            entries.push(CashDisbursementsJournalEntry {
+                id: None,
+                period_ended: period_ended.to_string(),
+                txn_date,
+                payee_name,
+                check_no,
+                description: memo,
+                gross_amount,
+                withholding_tax,
+                net_disbursement,
+                qb_txn_id: txn_id,
+                synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+            });
+        }
+
+        // 2. Bill Payment Checks (<BillPaymentCheckRet>)
+        let bpc_chunks: Vec<&str> = xml.split("<BillPaymentCheckRet>").skip(1).collect();
+        for chunk in bpc_chunks {
+            let end_idx = chunk.find("</BillPaymentCheckRet>").unwrap_or(chunk.len());
+            let item_xml = &chunk[..end_idx];
+
+            let txn_id = Self::extract_tag_value(item_xml, "TxnID");
+            let raw_date = Self::extract_tag_value(item_xml, "TxnDate").unwrap_or_else(|| "2023-02-10".to_string());
+            let txn_date = if raw_date.contains('-') {
+                let parts: Vec<&str> = raw_date.split('-').collect();
+                if parts.len() == 3 { format!("{}/{}/{}", parts[1], parts[2], parts[0]) } else { raw_date }
+            } else { raw_date };
+
+            let check_no = Self::extract_tag_value(item_xml, "RefNumber").unwrap_or_else(|| "CHK-001".to_string());
+            let payee_name = Self::extract_nested_tag(item_xml, "PayeeEntityRef", "FullName")
+                .or_else(|| Self::extract_tag_value(item_xml, "Payee"))
+                .unwrap_or_else(|| "Vendor Payee".to_string());
+
+            let memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_else(|| "Bill Payment Check".to_string());
+
+            let check_amt: f64 = Self::extract_tag_value(item_xml, "Amount")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+
+            // Scan AppliedToTxnRet for Withholding Tax discounts applied to bills
+            let mut applied_wtax = 0.0;
+            let applied_chunks: Vec<&str> = item_xml.split("<AppliedToTxnRet>").skip(1).collect();
+            for a_chunk in applied_chunks {
+                let end_a = a_chunk.find("</AppliedToTxnRet>").unwrap_or(a_chunk.len());
+                let a_xml = &a_chunk[..end_a];
+
+                let disc_amt: f64 = Self::extract_tag_value(a_xml, "DiscountAmount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+                applied_wtax += disc_amt.abs();
+            }
+
+            let is_direct_wtax = memo.to_lowercase().contains("withholding tax")
+                || memo.to_lowercase().contains("(withholding tax)");
+
+            let withholding_tax = if applied_wtax > 0.0 {
+                ((applied_wtax) * 100.0).round() / 100.0
+            } else if is_direct_wtax {
+                check_amt
+            } else {
+                0.0
+            };
+
+            let gross_amount = if applied_wtax > 0.0 {
+                ((check_amt + applied_wtax) * 100.0).round() / 100.0
+            } else {
+                check_amt
+            };
+
+            let net_disbursement = check_amt;
 
             entries.push(CashDisbursementsJournalEntry {
                 id: None,

@@ -347,7 +347,9 @@ export const CashDisbursementsJournalView = ({
                     <td className="py-1 px-2 text-center font-mono whitespace-nowrap">{item.check_no}</td>
                     <td className="py-1 px-2.5 text-slate-600 leading-tight text-[11px]">{item.description}</td>
                     <td className="py-1 px-2.5 text-right font-mono whitespace-nowrap">{formatCurrency(item.gross_amount)}</td>
-                    <td className="py-1 px-2.5 text-right font-mono text-slate-600 whitespace-nowrap">{formatCurrency(item.withholding_tax)}</td>
+                    <td className={`py-1 px-2.5 text-right font-mono whitespace-nowrap ${Number(item.withholding_tax) > 0 ? 'text-amber-800 font-semibold' : 'text-slate-400'}`}>
+                      {formatCurrency(item.withholding_tax)}
+                    </td>
                     <td className="py-1 px-2.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap">{formatCurrency(item.net_disbursement)}</td>
                   </tr>
                 ))
@@ -358,7 +360,9 @@ export const CashDisbursementsJournalView = ({
                 <tr className="bg-slate-50 font-bold border-t border-b-4 border-double border-slate-800 text-slate-900 divide-x divide-slate-400">
                   <td colSpan={4} className="py-2 px-3 text-right uppercase tracking-wider">TOTAL :</td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs whitespace-nowrap">{formatCurrency(totals.gross)}</td>
-                  <td className="py-2 px-2 text-right font-mono text-xs text-slate-700 whitespace-nowrap">{formatCurrency(totals.wtax)}</td>
+                  <td className={`py-2 px-2.5 text-right font-mono text-xs whitespace-nowrap ${totals.wtax > 0 ? 'text-amber-900 font-bold' : 'text-slate-700'}`}>
+                    {formatCurrency(totals.wtax)}
+                  </td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">{formatCurrency(totals.net)}</td>
                 </tr>
               </tfoot>
