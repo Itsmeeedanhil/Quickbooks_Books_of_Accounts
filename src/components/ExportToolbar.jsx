@@ -126,18 +126,16 @@ export const ExportToolbar = ({
           'OR No.',
           'Description',
           'Gross Amount',
-          'Withholding Tax (2307 CWT)',
           'Net Collection',
         ];
         colDefs = [
           { width: 13, align: 'center' },
           { width: 20, align: 'center' },
-          { width: 36, align: 'left' },
+          { width: 38, align: 'left' },
           { width: 16, align: 'center' },
-          { width: 42, align: 'left' },
-          { width: 18, align: 'right', isNum: true },
-          { width: 22, align: 'right', isNum: true },
-          { width: 18, align: 'right', isNum: true },
+          { width: 45, align: 'left' },
+          { width: 20, align: 'right', isNum: true },
+          { width: 20, align: 'right', isNum: true },
         ];
       } else if (activeJournal === 'cash_disbursements') {
         colHeaders = [
@@ -431,10 +429,9 @@ export const ExportToolbar = ({
         });
         for (let c = 1; c <= numCols; c++) totRow.getCell(c).border = doubleBottomBorder;
       } else if (activeJournal === 'cash_receipts') {
-        let tGross = 0, tWtax = 0, tNet = 0;
+        let tGross = 0, tNet = 0;
         data.forEach((item) => {
           tGross += Number(item.gross_amount) || 0;
-          tWtax += Number(item.withholding_tax_2307) || 0;
           tNet += Number(item.net_collection) || 0;
 
           const row = ws.addRow([
@@ -444,7 +441,6 @@ export const ExportToolbar = ({
             item.or_no,
             cleanText(item.description),
             Number(item.gross_amount) || 0,
-            Number(item.withholding_tax_2307) || 0,
             Number(item.net_collection) || 0,
           ]);
           colDefs.forEach((col, idx) => {
@@ -455,11 +451,11 @@ export const ExportToolbar = ({
           });
         });
 
-        const totRow = ws.addRow(['TOTAL :', '', '', '', '', tGross, tWtax, tNet]);
+        const totRow = ws.addRow(['TOTAL :', '', '', '', '', tGross, tNet]);
         ws.mergeCells(totRow.number, 1, totRow.number, 5);
         totRow.getCell(1).font = { name: 'Calibri', size: 9, bold: true };
         totRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
-        [6, 7, 8].forEach((cIdx) => {
+        [6, 7].forEach((cIdx) => {
           const c = totRow.getCell(cIdx);
           c.font = { name: 'Calibri', size: 9, bold: true };
           c.numFmt = '#,##0.00;(#,##0.00);"-"';
@@ -729,7 +725,6 @@ export const ExportToolbar = ({
             'OR No.',
             'Description',
             'Gross Amount',
-            'Withholding Tax\n(2307 CWT)',
             'Net Collection',
           ],
         ];
@@ -741,32 +736,28 @@ export const ExportToolbar = ({
           item.or_no,
           item.description,
           formatCurrency(item.gross_amount),
-          formatCurrency(item.withholding_tax_2307),
           formatCurrency(item.net_collection),
         ]);
 
         const tGross = data.reduce((s, i) => s + (Number(i.gross_amount) || 0), 0);
-        const tWtax = data.reduce((s, i) => s + (Number(i.withholding_tax_2307) || 0), 0);
         const tNet = data.reduce((s, i) => s + (Number(i.net_collection) || 0), 0);
 
         tableFoot = [
           [
             { content: 'TOTAL :', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } },
             { content: formatCurrency(tGross), styles: { halign: 'right', fontStyle: 'bold' } },
-            { content: formatCurrency(tWtax), styles: { halign: 'right', fontStyle: 'bold' } },
             { content: formatCurrency(tNet), styles: { halign: 'right', fontStyle: 'bold' } },
           ],
         ];
 
         columnStyles = {
           0: { halign: 'center', cellWidth: 55 },
-          1: { halign: 'center', cellWidth: 80 },
-          2: { halign: 'left', cellWidth: 150 },
-          3: { halign: 'center', cellWidth: 60 },
-          4: { halign: 'left', cellWidth: 196 },
-          5: { halign: 'right', cellWidth: 85 },
-          6: { halign: 'right', cellWidth: 85 },
-          7: { halign: 'right', cellWidth: 90 },
+          1: { halign: 'center', cellWidth: 85 },
+          2: { halign: 'left', cellWidth: 170 },
+          3: { halign: 'center', cellWidth: 65 },
+          4: { halign: 'left', cellWidth: 235 },
+          5: { halign: 'right', cellWidth: 95 },
+          6: { halign: 'right', cellWidth: 96 },
         };
       } else if (activeJournal === 'cash_disbursements') {
         tableHead = [
