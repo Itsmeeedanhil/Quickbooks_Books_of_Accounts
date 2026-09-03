@@ -1,0 +1,29 @@
+﻿# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Rust / Tauri build output
+src-tauri/target/
+src-tauri/Wix_x64/
+*.pdb
+
+# MS Access locks & temporary files
+*.laccdb
+*.ldb
+
+# Environment & Logs
+.env
+.env.*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db
+
+# IDE configuration
+.vscode/
+.idea/

@@ -1,0 +1,321 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-white text-slate-900 antialiased font-sans;
+  }
+}
+
+/* Custom Smooth Modern Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #ffffff;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: #ffffff;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Print Specific Rules for Official Philippine BIR Books of Accounts Loose-Leaf Compliance */
+@media print {
+  @page {
+    size: landscape;
+    margin: 6mm 5mm 6mm 5mm;
+  }
+
+  /* Force pure clean white background across the entire printed document */
+  *,
+  html,
+  body,
+  #root,
+  #root > div,
+  main,
+  main > div,
+  .overflow-hidden,
+  .overflow-auto,
+  .overflow-x-auto,
+  .overflow-y-auto,
+  .flex-1,
+  .h-screen {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  body {
+    font-size: 6.5pt !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .no-print,
+  header,
+  nav,
+  button,
+  input,
+  select,
+  .actions-bar,
+  [role="dialog"],
+  .fixed,
+  .sticky {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  /* Remove all min-width blocks so table fits 100% of the paper width */
+  div,
+  table,
+  thead,
+  tbody,
+  tfoot,
+  tr,
+  th,
+  td {
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+    font-size: 6pt !important;
+    margin: 0 !important;
+    border: 1px solid #333333 !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+
+  thead {
+    display: table-header-group !important; /* Repeats table header at top of every page */
+  }
+
+  tfoot {
+    display: table-footer-group !important; /* Displays totals on footer */
+  }
+
+  /* Fine, clean accounting borders (not overly bold) */
+  th,
+  td {
+    border: 0.5pt solid #475569 !important;
+    padding: 2.5px 2px !important;
+    color: #000000 !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    font-size: 5.8pt !important;
+    line-height: 1.15 !important;
+  }
+
+  /* Strict Column Widths for 10-column tables (Sales & Purchase Journals) */
+  table th:nth-child(1),
+  table td:nth-child(1) {
+    width: 7.5% !important;
+  }
+
+  table th:nth-child(2),
+  table td:nth-child(2) {
+    width: 10.5% !important;
+  }
+
+  table th:nth-child(3),
+  table td:nth-child(3) {
+    width: 16% !important;
+  }
+
+  table th:nth-child(4),
+  table td:nth-child(4) {
+    width: 15% !important;
+  }
+
+  table th:nth-child(5),
+  table td:nth-child(5) {
+    width: 14% !important;
+  }
+
+  table th:nth-child(6),
+  table td:nth-child(6) {
+    width: 8% !important;
+  }
+
+  table th:nth-child(7),
+  table td:nth-child(7) {
+    width: 8.5% !important;
+  }
+
+  table th:nth-child(8),
+  table td:nth-child(8) {
+    width: 5% !important;
+  }
+
+  table th:nth-child(9),
+  table td:nth-child(9) {
+    width: 7.5% !important;
+  }
+
+  table th:nth-child(10),
+  table td:nth-child(10) {
+    width: 8% !important;
+  }
+
+  /* ALL TABLE COLUMN HEADERS (THEAD TH) ARE STRICTLY ALWAYS CENTERED IN PRINT */
+  thead th,
+  thead tr th,
+  table thead th,
+  table thead tr th,
+  table.general-ledger-table thead th,
+  table.general-ledger-table thead tr th,
+  th {
+    text-align: center !important;
+    vertical-align: middle !important;
+    font-weight: 700 !important;
+    background-color: #ffffff !important;
+  }
+
+  /* ACCOUNT HEADERS & SUBTOTALS ARE ALWAYS LEFT ALIGNED */
+  tbody td[colspan],
+  tbody td[colSpan],
+  tbody td.account-header-cell,
+  tbody td.account-subtotal-cell,
+  tbody tr.account-header-row td,
+  tbody tr.account-subtotal-row td,
+  .account-header-cell,
+  .account-subtotal-cell {
+    text-align: left !important;
+    padding-left: 6px !important;
+    white-space: normal !important;
+    font-weight: 700 !important;
+  }
+
+  /* TBODY DATA CELL ALIGNMENTS (for normal 1-col data cells) */
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(1):not([colspan]) {
+    text-align: center !important;
+    white-space: nowrap !important;
+  }
+
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(2):not([colspan]) {
+    text-align: center !important;
+    white-space: nowrap !important;
+    font-size: 5.5pt !important;
+  }
+
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(3):not([colspan]) {
+    text-align: left !important;
+    word-break: break-word !important;
+  }
+
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(4):not([colspan]) {
+    text-align: left !important;
+    word-break: break-word !important;
+  }
+
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(5):not([colspan]) {
+    text-align: left !important;
+    word-break: break-word !important;
+  }
+
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(6):not([colspan]) {
+    text-align: center !important;
+    white-space: nowrap !important;
+  }
+
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(7):not([colspan]) {
+    text-align: right !important;
+    white-space: nowrap !important;
+  }
+
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(8):not([colspan]) {
+    text-align: right !important;
+    white-space: nowrap !important;
+  }
+
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(9):not([colspan]) {
+    text-align: right !important;
+    white-space: nowrap !important;
+  }
+
+  tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(10):not([colspan]) {
+    text-align: right !important;
+    white-space: nowrap !important;
+  }
+
+  /* General Ledger 8-Column Specific Print Widths */
+  table.general-ledger-table th:nth-child(1),
+  table.general-ledger-table td:nth-child(1) { width: 12% !important; }
+  table.general-ledger-table th:nth-child(2),
+  table.general-ledger-table td:nth-child(2) { width: 9% !important; }
+  table.general-ledger-table th:nth-child(3),
+  table.general-ledger-table td:nth-child(3) { width: 7% !important; }
+  table.general-ledger-table th:nth-child(4),
+  table.general-ledger-table td:nth-child(4) { width: 18% !important; }
+  table.general-ledger-table th:nth-child(5),
+  table.general-ledger-table td:nth-child(5) { width: 24% !important; }
+  table.general-ledger-table th:nth-child(6),
+  table.general-ledger-table td:nth-child(6) { width: 10% !important; }
+  table.general-ledger-table th:nth-child(7),
+  table.general-ledger-table td:nth-child(7) { width: 10% !important; }
+  table.general-ledger-table th:nth-child(8),
+  table.general-ledger-table td:nth-child(8) { width: 10% !important; }
+
+  /* General Ledger TBODY Data Cell Alignments (ONLY applies to tbody data cells, NOT headers) */
+  table.general-ledger-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(1):not([colspan]) { text-align: left !important; }
+  table.general-ledger-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(2):not([colspan]) { text-align: center !important; }
+  table.general-ledger-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(3):not([colspan]) { text-align: center !important; }
+  table.general-ledger-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(4):not([colspan]) { text-align: left !important; }
+  table.general-ledger-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(5):not([colspan]) { text-align: left !important; }
+  table.general-ledger-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(6):not([colspan]) { text-align: right !important; }
+  table.general-ledger-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(7):not([colspan]) { text-align: right !important; }
+  table.general-ledger-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(8):not([colspan]) { text-align: right !important; }
+
+  /* Total Row: Classic Philippine Accounting Double Bottom Line */
+  tfoot tr {
+    border-top: 1px solid #000000 !important;
+    border-bottom: 2.5pt double #000000 !important;
+    font-weight: 700 !important;
+    background-color: #ffffff !important;
+  }
+
+  tfoot td {
+    border: 0.5pt solid #475569 !important;
+    border-top: 1px solid #000000 !important;
+    border-bottom: 2.5pt double #000000 !important;
+    padding: 2.5px 2px !important;
+    white-space: nowrap !important;
+    font-size: 5.8pt !important;
+  }
+}
