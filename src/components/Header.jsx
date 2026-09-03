@@ -120,9 +120,11 @@ export const Header = ({
       {/* Top Application Bar */}
       <div className="px-6 py-2.5 flex items-center justify-between border-b border-slate-800/80">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center font-bold text-white shadow-md shadow-emerald-950/30">
-            <BookOpen className="w-4 h-4" />
-          </div>
+          <img
+            src="/logo.png"
+            alt="Books of Accounts Logo"
+            className="w-9 h-9 rounded-lg object-cover border border-emerald-500/30 shadow-md shadow-emerald-950/40"
+          />
           <div>
             <div className="flex items-center gap-2">
               <span className="font-bold text-sm tracking-tight text-white">
