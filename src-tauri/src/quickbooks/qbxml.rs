@@ -834,7 +834,6 @@ impl QbXmlParser {
             let bill_no = Self::extract_tag_value(item_xml, "RefNumber").unwrap_or_else(|| "BILL-001".to_string());
             let vendor_name = Self::extract_nested_tag(item_xml, "VendorRef", "FullName").unwrap_or_else(|| "Vendor Name".to_string());
             let vendor_tin = vendor_tins.get(&vendor_name).cloned().unwrap_or_else(|| "102-334-556-000".to_string());
-            let memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_else(|| "Purchase of Supplies".to_string());
 
             let mut address_parts = Vec::new();
             if let Some(addr1) = Self::extract_nested_tag(item_xml, "VendorAddress", "Addr1") { if !addr1.is_empty() { address_parts.push(addr1); } }
@@ -848,12 +847,98 @@ impl QbXmlParser {
                 "National Highway, Calamba City, Laguna".to_string()
             };
 
-            let amount: f64 = Self::extract_tag_value(item_xml, "AmountDue")
+            let mut gross_amount = 0.0;
+            let mut total_discount = 0.0;
+            let mut first_item_desc = String::new();
+
+            // 1. Scan Item lines
+            let item_chunks: Vec<&str> = item_xml.split("<ItemLineRet>").skip(1).collect();
+            for i_chunk in item_chunks {
+                let end_i = i_chunk.find("</ItemLineRet>").unwrap_or(i_chunk.len());
+                let line_xml = &i_chunk[..end_i];
+
+                let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
+                let desc = Self::extract_tag_value(line_xml, "Desc").unwrap_or_default();
+                let line_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                let is_discount = item_name.to_lowercase().contains("discount") || desc.to_lowercase().contains("discount");
+
+                if line_amt < 0.0 || is_discount {
+                    total_discount += line_amt.abs();
+                } else if line_amt > 0.0 {
+                    gross_amount += line_amt;
+                    if first_item_desc.is_empty() && !desc.is_empty() {
+                        first_item_desc = desc;
+                    }
+                }
+            }
+
+            // 2. Scan Expense lines
+            let exp_chunks: Vec<&str> = item_xml.split("<ExpenseLineRet>").skip(1).collect();
+            for e_chunk in exp_chunks {
+                let end_e = e_chunk.find("</ExpenseLineRet>").unwrap_or(e_chunk.len());
+                let exp_xml = &e_chunk[..end_e];
+
+                let acct_name = Self::extract_nested_tag(exp_xml, "AccountRef", "FullName").unwrap_or_default();
+                let memo_exp = Self::extract_tag_value(exp_xml, "Memo").unwrap_or_default();
+                let exp_amt: f64 = Self::extract_tag_value(exp_xml, "Amount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                let is_discount = acct_name.to_lowercase().contains("discount") 
+                    || acct_name.to_lowercase().contains("withholding")
+                    || memo_exp.to_lowercase().contains("discount");
+
+                if exp_amt < 0.0 || is_discount {
+                    total_discount += exp_amt.abs();
+                } else if exp_amt > 0.0 {
+                    gross_amount += exp_amt;
+                    if first_item_desc.is_empty() && !memo_exp.is_empty() {
+                        first_item_desc = memo_exp;
+                    }
+                }
+            }
+
+            // 3. Scan Discount tags (from QB Discount and Credits window)
+            let disc_chunks: Vec<&str> = item_xml.split("<DiscountLineRet>").skip(1).collect();
+            for d_chunk in disc_chunks {
+                let end_d = d_chunk.find("</DiscountLineRet>").unwrap_or(d_chunk.len());
+                let d_xml = &d_chunk[..end_d];
+                let d_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+                total_discount += d_amt.abs();
+            }
+
+            let suggested_disc: f64 = Self::extract_tag_value(item_xml, "SuggestedDiscountAmount")
+                .or_else(|| Self::extract_tag_value(item_xml, "DiscountAmount"))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            if suggested_disc > 0.0 && total_discount == 0.0 {
+                total_discount += suggested_disc;
+            }
+
+            let amount_due: f64 = Self::extract_tag_value(item_xml, "AmountDue")
                 .or_else(|| Self::extract_tag_value(item_xml, "BalanceRemaining"))
+                .or_else(|| Self::extract_tag_value(item_xml, "OpenAmount"))
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
 
-            let vatable_base = amount.max(0.0);
+            let memo = Self::extract_tag_value(item_xml, "Memo")
+                .filter(|m| !m.trim().is_empty())
+                .or_else(|| if !first_item_desc.is_empty() { Some(first_item_desc) } else { None })
+                .unwrap_or_else(|| "Purchase of Supplies".to_string());
+
+            let amount = if gross_amount > 0.0 {
+                ((gross_amount) * 100.0).round() / 100.0
+            } else {
+                ((amount_due + total_discount) * 100.0).round() / 100.0
+            };
+
+            let discount = ((total_discount) * 100.0).round() / 100.0;
+            let vatable_base = (amount - discount).max(0.0);
             let input_vat = ((vatable_base * mapping.default_vat_rate) * 100.0).round() / 100.0;
             let net_purchases = ((vatable_base + input_vat) * 100.0).round() / 100.0;
 
@@ -867,6 +952,50 @@ impl QbXmlParser {
                 description: memo,
                 bill_no,
                 amount,
+                discount,
+                input_vat,
+                net_purchases,
+                qb_txn_id: txn_id,
+                synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+            });
+        }
+
+        // Also process Vendor Credits (Vendor Credit Memos / Returns)
+        let vc_chunks: Vec<&str> = xml.split("<VendorCreditRet>").skip(1).collect();
+        for chunk in vc_chunks {
+            let end_idx = chunk.find("</VendorCreditRet>").unwrap_or(chunk.len());
+            let item_xml = &chunk[..end_idx];
+
+            let txn_id = Self::extract_tag_value(item_xml, "TxnID");
+            let raw_date = Self::extract_tag_value(item_xml, "TxnDate").unwrap_or_else(|| "2023-02-05".to_string());
+            let txn_date = if raw_date.contains('-') {
+                let parts: Vec<&str> = raw_date.split('-').collect();
+                if parts.len() == 3 { format!("{}/{}/{}", parts[1], parts[2], parts[0]) } else { raw_date }
+            } else { raw_date };
+
+            let bill_no = Self::extract_tag_value(item_xml, "RefNumber").unwrap_or_else(|| "VC-001".to_string());
+            let vendor_name = Self::extract_nested_tag(item_xml, "VendorRef", "FullName").unwrap_or_else(|| "Vendor Name".to_string());
+            let vendor_tin = vendor_tins.get(&vendor_name).cloned().unwrap_or_else(|| "102-334-556-000".to_string());
+            let memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_else(|| "Vendor Credit / Return".to_string());
+
+            let total_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+
+            let vatable_base = -total_amount.abs();
+            let input_vat = ((vatable_base * mapping.default_vat_rate) * 100.0).round() / 100.0;
+            let net_purchases = ((vatable_base + input_vat) * 100.0).round() / 100.0;
+
+            entries.push(PurchaseJournalEntry {
+                id: None,
+                period_ended: period_ended.to_string(),
+                txn_date,
+                vendor_tin,
+                vendor_name,
+                address: "".to_string(),
+                description: memo,
+                bill_no,
+                amount: vatable_base,
                 discount: 0.0,
                 input_vat,
                 net_purchases,
