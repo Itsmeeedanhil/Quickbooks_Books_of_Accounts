@@ -849,6 +849,7 @@ impl QbXmlParser {
 
             let mut gross_amount = 0.0;
             let mut total_discount = 0.0;
+            let mut explicit_input_tax = 0.0;
             let mut first_item_desc = String::new();
 
             // 1. Scan Item lines
@@ -864,8 +865,11 @@ impl QbXmlParser {
                     .unwrap_or(0.0);
 
                 let is_discount = item_name.to_lowercase().contains("discount") || desc.to_lowercase().contains("discount");
+                let is_tax = item_name.to_lowercase().contains("input tax") || item_name.to_lowercase().contains("input vat") || item_name.to_lowercase().contains("evat");
 
-                if line_amt < 0.0 || is_discount {
+                if is_tax {
+                    explicit_input_tax += line_amt;
+                } else if line_amt < 0.0 || is_discount {
                     total_discount += line_amt.abs();
                 } else if line_amt > 0.0 {
                     gross_amount += line_amt;
@@ -891,7 +895,13 @@ impl QbXmlParser {
                     || acct_name.to_lowercase().contains("withholding")
                     || memo_exp.to_lowercase().contains("discount");
 
-                if exp_amt < 0.0 || is_discount {
+                let is_tax = acct_name.to_lowercase().contains("input tax") 
+                    || acct_name.to_lowercase().contains("input vat") 
+                    || acct_name.to_lowercase().contains("evat");
+
+                if is_tax {
+                    explicit_input_tax += exp_amt;
+                } else if exp_amt < 0.0 || is_discount {
                     total_discount += exp_amt.abs();
                 } else if exp_amt > 0.0 {
                     gross_amount += exp_amt;
@@ -920,6 +930,18 @@ impl QbXmlParser {
                 total_discount += suggested_disc;
             }
 
+            // 4. Sales Tax tag from QuickBooks
+            let qb_sales_tax: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
+                .or_else(|| Self::extract_tag_value(item_xml, "TaxAmount"))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+
+            let input_vat = if qb_sales_tax > 0.0 {
+                ((qb_sales_tax) * 100.0).round() / 100.0
+            } else {
+                ((explicit_input_tax) * 100.0).round() / 100.0
+            };
+
             let amount_due: f64 = Self::extract_tag_value(item_xml, "AmountDue")
                 .or_else(|| Self::extract_tag_value(item_xml, "BalanceRemaining"))
                 .or_else(|| Self::extract_tag_value(item_xml, "OpenAmount"))
@@ -931,16 +953,23 @@ impl QbXmlParser {
                 .or_else(|| if !first_item_desc.is_empty() { Some(first_item_desc) } else { None })
                 .unwrap_or_else(|| "Purchase of Supplies".to_string());
 
+            let discount = ((total_discount) * 100.0).round() / 100.0;
+
             let amount = if gross_amount > 0.0 {
                 ((gross_amount) * 100.0).round() / 100.0
+            } else if amount_due > 0.0 {
+                (((amount_due - input_vat) + discount).max(0.0) * 100.0).round() / 100.0
             } else {
-                ((amount_due + total_discount) * 100.0).round() / 100.0
+                0.0
             };
 
-            let discount = ((total_discount) * 100.0).round() / 100.0;
             let vatable_base = (amount - discount).max(0.0);
-            let input_vat = ((vatable_base * mapping.default_vat_rate) * 100.0).round() / 100.0;
-            let net_purchases = ((vatable_base + input_vat) * 100.0).round() / 100.0;
+
+            let net_purchases = if amount_due > 0.0 {
+                amount_due
+            } else {
+                ((vatable_base + input_vat) * 100.0).round() / 100.0
+            };
 
             entries.push(PurchaseJournalEntry {
                 id: None,
