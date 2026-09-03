@@ -523,10 +523,6 @@ impl QbXmlParser {
                 "25F W Fifth Avenue Bldg. 5th Avenue Bonifacio Global City Taguig City".to_string()
             };
 
-            let memo = Self::extract_tag_value(item_xml, "Memo")
-                .or_else(|| Self::extract_nested_tag(item_xml, "InvoiceLineRet", "Desc"))
-                .unwrap_or_else(|| "Shuttle Service".to_string());
-
             // Lookup TIN from Customer mapping or custom fields
             let customer_tin = customer_tins.get(&customer_name)
                 .cloned()
@@ -534,34 +530,90 @@ impl QbXmlParser {
                 .or_else(|| Self::extract_tag_value(item_xml, "ResaleNumber"))
                 .unwrap_or_else(|| "003-841-103-000".to_string());
 
+            // Scan all invoice lines to detect gross amount, line item discounts, and descriptions
+            let mut gross_amount = 0.0;
+            let mut total_discount = 0.0;
+            let mut first_item_desc = String::new();
+
+            let line_chunks: Vec<&str> = item_xml.split("<InvoiceLineRet>").skip(1).collect();
+            for l_chunk in line_chunks {
+                let end_l = l_chunk.find("</InvoiceLineRet>").unwrap_or(l_chunk.len());
+                let line_xml = &l_chunk[..end_l];
+
+                let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
+                let desc = Self::extract_tag_value(line_xml, "Desc").unwrap_or_default();
+                let line_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                let is_discount = item_name.to_lowercase().contains("discount") || desc.to_lowercase().contains("discount");
+
+                if line_amt < 0.0 || is_discount {
+                    total_discount += line_amt.abs();
+                } else if line_amt > 0.0 {
+                    gross_amount += line_amt;
+                    if first_item_desc.is_empty() && !desc.is_empty() {
+                        first_item_desc = desc;
+                    }
+                }
+            }
+
+            // Also check DiscountLineRet if present
+            let disc_chunks: Vec<&str> = item_xml.split("<DiscountLineRet>").skip(1).collect();
+            for d_chunk in disc_chunks {
+                let end_d = d_chunk.find("</DiscountLineRet>").unwrap_or(d_chunk.len());
+                let d_xml = &d_chunk[..end_d];
+                let d_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+                total_discount += d_amt.abs();
+            }
+
             let subtotal: f64 = Self::extract_tag_value(item_xml, "Subtotal")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
 
-            let discount_amount: f64 = Self::extract_tag_value(item_xml, "DiscountLineRet")
-                .and_then(|disc_block| Self::extract_tag_value(&disc_block, "Amount"))
+            let total_tax: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
 
-            let balance_remaining: f64 = Self::extract_tag_value(item_xml, "AppliedAmount")
+            let total_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
+                .or_else(|| Self::extract_tag_value(item_xml, "AppliedAmount"))
                 .or_else(|| Self::extract_tag_value(item_xml, "BalanceRemaining"))
-                .or_else(|| Self::extract_tag_value(item_xml, "TotalAmount"))
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
 
-            let amount = if subtotal > 0.0 { subtotal } else { balance_remaining };
-            let discount = discount_amount.abs();
+            let memo = Self::extract_tag_value(item_xml, "Memo")
+                .filter(|m| !m.trim().is_empty())
+                .or_else(|| if !first_item_desc.is_empty() { Some(first_item_desc) } else { None })
+                .unwrap_or_else(|| "Sales Invoice".to_string());
 
-            let vatable_base = (amount - discount).max(0.0);
-            let vat_amount = if mapping.auto_compute_vat {
-                ((vatable_base * mapping.default_vat_rate) * 100.0).round() / 100.0
+            let amount = if gross_amount > 0.0 {
+                ((gross_amount) * 100.0).round() / 100.0
+            } else if subtotal > 0.0 {
+                ((subtotal + total_discount) * 100.0).round() / 100.0
+            } else if total_amount > 0.0 && total_tax > 0.0 {
+                (((total_amount - total_tax) + total_discount) * 100.0).round() / 100.0
             } else {
-                Self::extract_tag_value(item_xml, "SalesTaxTotal")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(((vatable_base * 0.12) * 100.0).round() / 100.0)
+                ((total_amount + total_discount) * 100.0).round() / 100.0
             };
 
-            let net_sales = ((vatable_base + vat_amount) * 100.0).round() / 100.0;
+            let discount = ((total_discount) * 100.0).round() / 100.0;
+            let vatable_base = (amount - discount).max(0.0);
+
+            let vat_amount = if total_tax > 0.0 {
+                total_tax
+            } else if mapping.auto_compute_vat {
+                ((vatable_base * mapping.default_vat_rate) * 100.0).round() / 100.0
+            } else {
+                ((vatable_base * 0.12) * 100.0).round() / 100.0
+            };
+
+            let net_sales = if total_amount > 0.0 {
+                total_amount
+            } else {
+                ((vatable_base + vat_amount) * 100.0).round() / 100.0
+            };
 
             entries.push(SalesJournalEntry {
                 id: None,
@@ -659,15 +711,52 @@ impl QbXmlParser {
                 "KM. 55 MAKILING HEIGHTS, PANSOL, CALAMBA, LAGUNA".to_string()
             };
 
-            let memo = Self::extract_nested_tag(item_xml, "SalesReceiptLineRet", "Desc")
-                .or_else(|| Self::extract_tag_value(item_xml, "Memo"))
-                .unwrap_or_else(|| "Sales Receipt".to_string());
-
             let customer_tin = customer_tins.get(&customer_name)
                 .cloned()
                 .unwrap_or_else(|| "000-000-000-000".to_string());
 
+            let mut gross_amount = 0.0;
+            let mut total_discount = 0.0;
+            let mut first_item_desc = String::new();
+
+            let line_chunks: Vec<&str> = item_xml.split("<SalesReceiptLineRet>").skip(1).collect();
+            for l_chunk in line_chunks {
+                let end_l = l_chunk.find("</SalesReceiptLineRet>").unwrap_or(l_chunk.len());
+                let line_xml = &l_chunk[..end_l];
+
+                let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
+                let desc = Self::extract_tag_value(line_xml, "Desc").unwrap_or_default();
+                let line_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                let is_discount = item_name.to_lowercase().contains("discount") || desc.to_lowercase().contains("discount");
+
+                if line_amt < 0.0 || is_discount {
+                    total_discount += line_amt.abs();
+                } else if line_amt > 0.0 {
+                    gross_amount += line_amt;
+                    if first_item_desc.is_empty() && !desc.is_empty() {
+                        first_item_desc = desc;
+                    }
+                }
+            }
+
+            let disc_chunks: Vec<&str> = item_xml.split("<DiscountLineRet>").skip(1).collect();
+            for d_chunk in disc_chunks {
+                let end_d = d_chunk.find("</DiscountLineRet>").unwrap_or(d_chunk.len());
+                let d_xml = &d_chunk[..end_d];
+                let d_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+                total_discount += d_amt.abs();
+            }
+
             let subtotal: f64 = Self::extract_tag_value(item_xml, "Subtotal")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+
+            let total_tax: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
 
@@ -675,13 +764,35 @@ impl QbXmlParser {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
 
-            let sales_tax: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+            let memo = Self::extract_tag_value(item_xml, "Memo")
+                .filter(|m| !m.trim().is_empty())
+                .or_else(|| if !first_item_desc.is_empty() { Some(first_item_desc) } else { None })
+                .unwrap_or_else(|| "Sales Receipt".to_string());
 
-            let amount = if subtotal > 0.0 { subtotal } else if total_amount > 0.0 && sales_tax > 0.0 { total_amount - sales_tax } else { total_amount };
-            let vat_amount = if sales_tax > 0.0 { sales_tax } else { ((amount * 0.12) * 100.0).round() / 100.0 };
-            let net_sales = if total_amount > 0.0 { total_amount } else { amount + vat_amount };
+            let amount = if gross_amount > 0.0 {
+                ((gross_amount) * 100.0).round() / 100.0
+            } else if subtotal > 0.0 {
+                ((subtotal + total_discount) * 100.0).round() / 100.0
+            } else if total_amount > 0.0 && total_tax > 0.0 {
+                (((total_amount - total_tax) + total_discount) * 100.0).round() / 100.0
+            } else {
+                ((total_amount + total_discount) * 100.0).round() / 100.0
+            };
+
+            let discount = ((total_discount) * 100.0).round() / 100.0;
+            let vatable_base = (amount - discount).max(0.0);
+
+            let vat_amount = if total_tax > 0.0 {
+                total_tax
+            } else {
+                ((vatable_base * 0.12) * 100.0).round() / 100.0
+            };
+
+            let net_sales = if total_amount > 0.0 {
+                total_amount
+            } else {
+                ((vatable_base + vat_amount) * 100.0).round() / 100.0
+            };
 
             entries.push(SalesJournalEntry {
                 id: None,
@@ -693,7 +804,7 @@ impl QbXmlParser {
                 description: memo,
                 sales_invoice_no: receipt_no,
                 amount,
-                discount: 0.0,
+                discount,
                 vat_amount,
                 net_sales,
                 qb_txn_id: txn_id,
