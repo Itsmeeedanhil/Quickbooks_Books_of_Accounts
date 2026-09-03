@@ -79,7 +79,7 @@ export const SettingsModal = ({
             }`}
           >
             <FileSliders className="w-3.5 h-3.5" />
-            <span>Field & Tax Mappings</span>
+            <span>Field Mappings</span>
           </button>
 
           <button
@@ -217,39 +217,6 @@ export const SettingsModal = ({
                 </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Default Value-Added Tax (VAT) Rate
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="1"
-                    value={mapForm.default_vat_rate}
-                    onChange={(e) => setMapForm({ ...mapForm, default_vat_rate: parseFloat(e.target.value) || 0.12 })}
-                    className="w-32 text-xs px-3 py-2 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600"
-                  />
-                  <span className="text-xs text-slate-600 font-medium">
-                    (Standard Philippine VAT is 0.12 for 12%)
-                  </span>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-200">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={mapForm.auto_compute_vat}
-                    onChange={(e) => setMapForm({ ...mapForm, auto_compute_vat: e.target.checked })}
-                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span className="text-xs font-semibold text-slate-800">
-                    Auto-calculate 12% Output Tax and Net Sales when Tax line is not explicit in QuickBooks
-                  </span>
-                </label>
-              </div>
             </div>
           )}
 
