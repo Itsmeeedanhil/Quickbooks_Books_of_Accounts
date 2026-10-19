@@ -324,14 +324,13 @@ export const CashDisbursementsJournalView = ({
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[75px]">Check No.</th>
                 <th className="py-2 px-2.5 text-center min-w-[160px]">Description</th>
                 <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Gross Amount</th>
-                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Withholding Tax</th>
                 <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[100px]">Net Disbursement</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-300">
               {filteredEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={6} className="py-12 text-center text-slate-400">
                     <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                     <p className="font-medium text-slate-600">No Cash Disbursements found for this period.</p>
                     <p className="text-[11px] text-slate-400 mt-1">
@@ -347,9 +346,6 @@ export const CashDisbursementsJournalView = ({
                     <td className="py-1 px-2 text-center font-mono whitespace-nowrap">{item.check_no}</td>
                     <td className="py-1 px-2.5 text-slate-600 leading-tight text-[11px]">{item.description}</td>
                     <td className="py-1 px-2.5 text-right font-mono whitespace-nowrap">{formatCurrency(item.gross_amount)}</td>
-                    <td className={`py-1 px-2.5 text-right font-mono whitespace-nowrap ${Number(item.withholding_tax) > 0 ? 'text-amber-800 font-semibold' : 'text-slate-400'}`}>
-                      {formatCurrency(item.withholding_tax)}
-                    </td>
                     <td className="py-1 px-2.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap">{formatCurrency(item.net_disbursement)}</td>
                   </tr>
                 ))
@@ -360,9 +356,6 @@ export const CashDisbursementsJournalView = ({
                 <tr className="bg-slate-50 font-bold border-t border-b-4 border-double border-slate-800 text-slate-900 divide-x divide-slate-400">
                   <td colSpan={4} className="py-2 px-3 text-right uppercase tracking-wider">TOTAL :</td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs whitespace-nowrap">{formatCurrency(totals.gross)}</td>
-                  <td className={`py-2 px-2.5 text-right font-mono text-xs whitespace-nowrap ${totals.wtax > 0 ? 'text-amber-900 font-bold' : 'text-slate-700'}`}>
-                    {formatCurrency(totals.wtax)}
-                  </td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">{formatCurrency(totals.net)}</td>
                 </tr>
               </tfoot>

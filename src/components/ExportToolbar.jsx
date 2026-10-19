@@ -144,17 +144,15 @@ export const ExportToolbar = ({
           'Check No.',
           'Description',
           'Gross Amount',
-          'Withholding Tax',
           'Net Disbursement',
         ];
         colDefs = [
           { width: 13, align: 'center' },
-          { width: 38, align: 'left' },
+          { width: 42, align: 'left' },
           { width: 16, align: 'center' },
-          { width: 45, align: 'left' },
-          { width: 18, align: 'right', isNum: true },
-          { width: 18, align: 'right', isNum: true },
-          { width: 18, align: 'right', isNum: true },
+          { width: 50, align: 'left' },
+          { width: 20, align: 'right', isNum: true },
+          { width: 20, align: 'right', isNum: true },
         ];
       } else if (activeJournal === 'general_journal') {
         colHeaders = [
@@ -463,10 +461,9 @@ export const ExportToolbar = ({
         });
         for (let c = 1; c <= numCols; c++) totRow.getCell(c).border = doubleBottomBorder;
       } else if (activeJournal === 'cash_disbursements') {
-        let tGross = 0, tWtax = 0, tNet = 0;
+        let tGross = 0, tNet = 0;
         data.forEach((item) => {
           tGross += Number(item.gross_amount) || 0;
-          tWtax += Number(item.withholding_tax) || 0;
           tNet += Number(item.net_disbursement) || 0;
 
           const row = ws.addRow([
@@ -475,7 +472,6 @@ export const ExportToolbar = ({
             item.check_no,
             cleanText(item.description),
             Number(item.gross_amount) || 0,
-            Number(item.withholding_tax) || 0,
             Number(item.net_disbursement) || 0,
           ]);
           colDefs.forEach((col, idx) => {
@@ -486,11 +482,11 @@ export const ExportToolbar = ({
           });
         });
 
-        const totRow = ws.addRow(['TOTAL :', '', '', '', tGross, tWtax, tNet]);
+        const totRow = ws.addRow(['TOTAL :', '', '', '', tGross, tNet]);
         ws.mergeCells(totRow.number, 1, totRow.number, 4);
         totRow.getCell(1).font = { name: 'Calibri', size: 9, bold: true };
         totRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
-        [5, 6, 7].forEach((cIdx) => {
+        [5, 6].forEach((cIdx) => {
           const c = totRow.getCell(cIdx);
           c.font = { name: 'Calibri', size: 9, bold: true };
           c.numFmt = '#,##0.00;(#,##0.00);"-"';
@@ -767,7 +763,6 @@ export const ExportToolbar = ({
             'Check No.',
             'Description',
             'Gross Amount',
-            'Withholding Tax',
             'Net Disbursement',
           ],
         ];
@@ -778,31 +773,27 @@ export const ExportToolbar = ({
           item.check_no,
           item.description,
           formatCurrency(item.gross_amount),
-          formatCurrency(item.withholding_tax),
           formatCurrency(item.net_disbursement),
         ]);
 
         const tGross = data.reduce((s, i) => s + (Number(i.gross_amount) || 0), 0);
-        const tWtax = data.reduce((s, i) => s + (Number(i.withholding_tax) || 0), 0);
         const tNet = data.reduce((s, i) => s + (Number(i.net_disbursement) || 0), 0);
 
         tableFoot = [
           [
             { content: 'TOTAL :', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } },
             { content: formatCurrency(tGross), styles: { halign: 'right', fontStyle: 'bold' } },
-            { content: formatCurrency(tWtax), styles: { halign: 'right', fontStyle: 'bold' } },
             { content: formatCurrency(tNet), styles: { halign: 'right', fontStyle: 'bold' } },
           ],
         ];
 
         columnStyles = {
           0: { halign: 'center', cellWidth: 55 },
-          1: { halign: 'left', cellWidth: 180 },
-          2: { halign: 'center', cellWidth: 65 },
-          3: { halign: 'left', cellWidth: 221 },
-          4: { halign: 'right', cellWidth: 90 },
-          5: { halign: 'right', cellWidth: 90 },
-          6: { halign: 'right', cellWidth: 100 },
+          1: { halign: 'left', cellWidth: 200 },
+          2: { halign: 'center', cellWidth: 70 },
+          3: { halign: 'left', cellWidth: 285 },
+          4: { halign: 'right', cellWidth: 95 },
+          5: { halign: 'right', cellWidth: 96 },
         };
       } else if (activeJournal === 'general_journal') {
         tableHead = [
