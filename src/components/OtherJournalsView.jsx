@@ -23,10 +23,9 @@ export const PurchaseJournalView = ({
     (acc, e) => ({
       amount: acc.amount + (Number(e.amount) || 0),
       discount: acc.discount + (Number(e.discount) || 0),
-      vat: acc.vat + (Number(e.input_vat) || 0),
       net: acc.net + (Number(e.net_purchases) || 0),
     }),
-    { amount: 0, discount: 0, vat: 0, net: 0 }
+    { amount: 0, discount: 0, net: 0 }
   );
 
   const formatCurrency = (num) =>
@@ -75,21 +74,17 @@ export const PurchaseJournalView = ({
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[100px]">Vendor's TIN</th>
                 <th className="py-2 px-2.5 text-center min-w-[125px]">Vendor Name</th>
                 <th className="py-2 px-2.5 text-center min-w-[135px]">Address</th>
-                <th className="py-2 px-2.5 text-center min-w-[120px]">Description</th>
+                <th className="py-2 px-2.5 text-center min-w-[140px]">Description</th>
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[75px]">Bill No.</th>
                 <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Amount</th>
-                <th className="py-2 px-2 text-center whitespace-nowrap min-w-[55px]">Discount</th>
-                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[85px]">
-                  VAT Amount
-                  <span className="block text-[9px] font-normal text-slate-600">(Input Tax)</span>
-                </th>
+                <th className="py-2 px-2 text-center whitespace-nowrap min-w-[95px]">Withholding Tax</th>
                 <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Net Purchases</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-300">
               {filteredEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400">
+                  <td colSpan={9} className="py-12 text-center text-slate-400">
                     <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                     <p className="font-medium text-slate-600">No Purchase Bills found for this period.</p>
                     <p className="text-[11px] text-slate-400 mt-1">
@@ -104,11 +99,12 @@ export const PurchaseJournalView = ({
                     <td className="py-1 px-2 text-center font-mono whitespace-nowrap text-[11px]">{item.vendor_tin}</td>
                     <td className="py-1 px-2.5 font-semibold text-slate-900">{item.vendor_name}</td>
                     <td className="py-1 px-2.5 text-slate-600 leading-tight text-[11px]">{item.address}</td>
-                    <td className="py-1 px-2.5 text-slate-600 italic text-[11px]">{item.description}</td>
+                    <td className="py-1 px-2.5 text-slate-700 font-medium text-[11px]">{item.description}</td>
                     <td className="py-1 px-2 text-center font-mono whitespace-nowrap">{item.bill_no}</td>
                     <td className="py-1 px-2.5 text-right font-mono whitespace-nowrap">{formatCurrency(item.amount)}</td>
-                    <td className="py-1 px-2 text-right font-mono text-slate-600 whitespace-nowrap">{formatCurrency(item.discount)}</td>
-                    <td className="py-1 px-2.5 text-right font-mono font-medium text-emerald-800 whitespace-nowrap">{formatCurrency(item.input_vat)}</td>
+                    <td className={`py-1 px-2 text-right font-mono whitespace-nowrap ${Number(item.discount) > 0 ? 'text-amber-800 font-semibold' : 'text-slate-400'}`}>
+                      {formatCurrency(item.discount)}
+                    </td>
                     <td className="py-1 px-2.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap">{formatCurrency(item.net_purchases)}</td>
                   </tr>
                 ))
@@ -119,8 +115,9 @@ export const PurchaseJournalView = ({
                 <tr className="bg-slate-50 font-bold border-t border-b-4 border-double border-slate-800 text-slate-900 divide-x divide-slate-400">
                   <td colSpan={6} className="py-2 px-3 text-right uppercase tracking-wider">TOTAL :</td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs whitespace-nowrap">{formatCurrency(totals.amount)}</td>
-                  <td className="py-2 px-2 text-right font-mono text-xs text-slate-700 whitespace-nowrap">{formatCurrency(totals.discount)}</td>
-                  <td className="py-2 px-2.5 text-right font-mono text-xs text-emerald-900 whitespace-nowrap">{formatCurrency(totals.vat)}</td>
+                  <td className={`py-2 px-2 text-right font-mono text-xs whitespace-nowrap ${totals.discount > 0 ? 'text-amber-900 font-bold' : 'text-slate-700'}`}>
+                    {formatCurrency(totals.discount)}
+                  </td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">{formatCurrency(totals.net)}</td>
                 </tr>
               </tfoot>

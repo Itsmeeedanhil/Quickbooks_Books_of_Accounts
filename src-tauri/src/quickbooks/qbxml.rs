@@ -815,7 +815,7 @@ impl QbXmlParser {
         entries
     }
 
-    pub fn parse_purchase_journal(xml: &str, period_ended: &str, mapping: &FieldMapping) -> Vec<PurchaseJournalEntry> {
+    pub fn parse_purchase_journal(xml: &str, period_ended: &str, _mapping: &FieldMapping) -> Vec<PurchaseJournalEntry> {
         let mut entries = Vec::new();
         let vendor_tins = Self::parse_vendor_tins(xml);
 
@@ -848,9 +848,9 @@ impl QbXmlParser {
             };
 
             let mut gross_amount = 0.0;
-            let mut total_discount = 0.0;
-            let mut explicit_input_tax = 0.0;
+            let mut total_wtax = 0.0;
             let mut first_item_desc = String::new();
+            let mut line_accounts: Vec<String> = Vec::new();
 
             // 1. Scan Item lines
             let item_chunks: Vec<&str> = item_xml.split("<ItemLineRet>").skip(1).collect();
@@ -864,15 +864,35 @@ impl QbXmlParser {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0.0);
 
-                let is_discount = item_name.to_lowercase().contains("discount") || desc.to_lowercase().contains("discount");
-                let is_tax = item_name.to_lowercase().contains("input tax") || item_name.to_lowercase().contains("input vat") || item_name.to_lowercase().contains("evat");
+                let item_lower = item_name.to_lowercase();
+                let desc_lower = desc.to_lowercase();
+
+                let is_tax = item_lower.contains("input tax") 
+                    || item_lower.contains("input vat") 
+                    || item_lower.contains("evat");
+
+                let is_wtax = item_lower.contains("withholding") 
+                    || item_lower.contains("with holding") 
+                    || item_lower.contains("wtax") 
+                    || item_lower.contains("w-tax") 
+                    || item_lower.contains("cwt") 
+                    || item_lower.contains("ewt") 
+                    || item_lower.contains("discount")
+                    || desc_lower.contains("withholding") 
+                    || desc_lower.contains("wtax") 
+                    || desc_lower.contains("cwt") 
+                    || desc_lower.contains("discount");
 
                 if is_tax {
-                    explicit_input_tax += line_amt;
-                } else if line_amt < 0.0 || is_discount {
-                    total_discount += line_amt.abs();
+                    // VAT excluded from purchase journal
+                } else if line_amt < 0.0 || is_wtax {
+                    total_wtax += line_amt.abs();
                 } else if line_amt > 0.0 {
                     gross_amount += line_amt;
+                    let clean = Self::clean_qb_text(&item_name);
+                    if !clean.is_empty() && !line_accounts.contains(&clean) {
+                        line_accounts.push(clean);
+                    }
                     if first_item_desc.is_empty() && !desc.is_empty() {
                         first_item_desc = desc;
                     }
@@ -891,20 +911,37 @@ impl QbXmlParser {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0.0);
 
-                let is_discount = acct_name.to_lowercase().contains("discount") 
-                    || acct_name.to_lowercase().contains("withholding")
-                    || memo_exp.to_lowercase().contains("discount");
+                let acct_lower = acct_name.to_lowercase();
+                let memo_lower = memo_exp.to_lowercase();
 
-                let is_tax = acct_name.to_lowercase().contains("input tax") 
-                    || acct_name.to_lowercase().contains("input vat") 
-                    || acct_name.to_lowercase().contains("evat");
+                let is_tax = acct_lower.contains("input tax") 
+                    || acct_lower.contains("input vat") 
+                    || acct_lower.contains("evat");
+
+                let is_wtax = acct_lower.contains("withholding") 
+                    || acct_lower.contains("with holding")
+                    || acct_lower.contains("wtax") 
+                    || acct_lower.contains("w-tax") 
+                    || acct_lower.contains("cwt") 
+                    || acct_lower.contains("ewt") 
+                    || acct_lower.contains("16420") 
+                    || acct_lower.contains("creditable")
+                    || acct_lower.contains("discount") 
+                    || memo_lower.contains("withholding") 
+                    || memo_lower.contains("wtax") 
+                    || memo_lower.contains("cwt") 
+                    || memo_lower.contains("discount");
 
                 if is_tax {
-                    explicit_input_tax += exp_amt;
-                } else if exp_amt < 0.0 || is_discount {
-                    total_discount += exp_amt.abs();
+                    // VAT excluded from purchase journal
+                } else if exp_amt < 0.0 || is_wtax {
+                    total_wtax += exp_amt.abs();
                 } else if exp_amt > 0.0 {
                     gross_amount += exp_amt;
+                    let clean = Self::clean_qb_text(&acct_name);
+                    if !clean.is_empty() && !line_accounts.contains(&clean) {
+                        line_accounts.push(clean);
+                    }
                     if first_item_desc.is_empty() && !memo_exp.is_empty() {
                         first_item_desc = memo_exp;
                     }
@@ -919,28 +956,16 @@ impl QbXmlParser {
                 let d_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0.0);
-                total_discount += d_amt.abs();
+                total_wtax += d_amt.abs();
             }
 
             let suggested_disc: f64 = Self::extract_tag_value(item_xml, "SuggestedDiscountAmount")
                 .or_else(|| Self::extract_tag_value(item_xml, "DiscountAmount"))
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
-            if suggested_disc > 0.0 && total_discount == 0.0 {
-                total_discount += suggested_disc;
+            if suggested_disc > 0.0 && total_wtax == 0.0 {
+                total_wtax += suggested_disc;
             }
-
-            // 4. Sales Tax tag from QuickBooks
-            let qb_sales_tax: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
-                .or_else(|| Self::extract_tag_value(item_xml, "TaxAmount"))
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
-
-            let input_vat = if qb_sales_tax > 0.0 {
-                ((qb_sales_tax) * 100.0).round() / 100.0
-            } else {
-                ((explicit_input_tax) * 100.0).round() / 100.0
-            };
 
             let amount_due: f64 = Self::extract_tag_value(item_xml, "AmountDue")
                 .or_else(|| Self::extract_tag_value(item_xml, "BalanceRemaining"))
@@ -948,28 +973,29 @@ impl QbXmlParser {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
 
-            let memo = Self::extract_tag_value(item_xml, "Memo")
-                .filter(|m| !m.trim().is_empty())
-                .or_else(|| if !first_item_desc.is_empty() { Some(first_item_desc) } else { None })
-                .unwrap_or_else(|| "Purchase of Supplies".to_string());
+            let bill_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
+            let description = if !line_accounts.is_empty() {
+                line_accounts.join(", ")
+            } else if !bill_memo.trim().is_empty() {
+                Self::clean_qb_text(&bill_memo)
+            } else if !first_item_desc.is_empty() {
+                Self::clean_qb_text(&first_item_desc)
+            } else {
+                "Purchase of Goods / Services".to_string()
+            };
 
-            let discount = ((total_discount) * 100.0).round() / 100.0;
+            let discount = ((total_wtax) * 100.0).round() / 100.0;
 
             let amount = if gross_amount > 0.0 {
                 ((gross_amount) * 100.0).round() / 100.0
             } else if amount_due > 0.0 {
-                (((amount_due - input_vat) + discount).max(0.0) * 100.0).round() / 100.0
+                ((amount_due + discount) * 100.0).round() / 100.0
             } else {
                 0.0
             };
 
-            let vatable_base = (amount - discount).max(0.0);
-
-            let net_purchases = if amount_due > 0.0 {
-                amount_due
-            } else {
-                ((vatable_base + input_vat) * 100.0).round() / 100.0
-            };
+            let input_vat = 0.0;
+            let net_purchases = ((amount - discount).max(0.0) * 100.0).round() / 100.0;
 
             entries.push(PurchaseJournalEntry {
                 id: None,
@@ -978,7 +1004,7 @@ impl QbXmlParser {
                 vendor_tin,
                 vendor_name,
                 address,
-                description: memo,
+                description,
                 bill_no,
                 amount,
                 discount,
@@ -1005,15 +1031,45 @@ impl QbXmlParser {
             let bill_no = Self::extract_tag_value(item_xml, "RefNumber").unwrap_or_else(|| "VC-001".to_string());
             let vendor_name = Self::extract_nested_tag(item_xml, "VendorRef", "FullName").unwrap_or_else(|| "Vendor Name".to_string());
             let vendor_tin = vendor_tins.get(&vendor_name).cloned().unwrap_or_else(|| "102-334-556-000".to_string());
-            let memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_else(|| "Vendor Credit / Return".to_string());
+
+            let mut vc_line_accounts: Vec<String> = Vec::new();
+            let exp_chunks: Vec<&str> = item_xml.split("<ExpenseLineRet>").skip(1).collect();
+            for e_chunk in exp_chunks {
+                let end_e = e_chunk.find("</ExpenseLineRet>").unwrap_or(e_chunk.len());
+                let exp_xml = &e_chunk[..end_e];
+                if let Some(acct) = Self::extract_nested_tag(exp_xml, "AccountRef", "FullName") {
+                    let clean = Self::clean_qb_text(&acct);
+                    if !clean.is_empty() && !vc_line_accounts.contains(&clean) {
+                        vc_line_accounts.push(clean);
+                    }
+                }
+            }
+            let item_chunks: Vec<&str> = item_xml.split("<ItemLineRet>").skip(1).collect();
+            for i_chunk in item_chunks {
+                let end_i = i_chunk.find("</ItemLineRet>").unwrap_or(i_chunk.len());
+                let line_xml = &i_chunk[..end_i];
+                if let Some(item) = Self::extract_nested_tag(line_xml, "ItemRef", "FullName") {
+                    let clean = Self::clean_qb_text(&item);
+                    if !clean.is_empty() && !vc_line_accounts.contains(&clean) {
+                        vc_line_accounts.push(clean);
+                    }
+                }
+            }
+            let vc_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
+            let description = if !vc_line_accounts.is_empty() {
+                vc_line_accounts.join(", ")
+            } else if !vc_memo.is_empty() {
+                Self::clean_qb_text(&vc_memo)
+            } else {
+                "Vendor Credit / Return".to_string()
+            };
 
             let total_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
 
             let vatable_base = -total_amount.abs();
-            let input_vat = ((vatable_base * mapping.default_vat_rate) * 100.0).round() / 100.0;
-            let net_purchases = ((vatable_base + input_vat) * 100.0).round() / 100.0;
+            let net_purchases = vatable_base;
 
             entries.push(PurchaseJournalEntry {
                 id: None,
@@ -1022,11 +1078,11 @@ impl QbXmlParser {
                 vendor_tin,
                 vendor_name,
                 address: "".to_string(),
-                description: memo,
+                description,
                 bill_no,
                 amount: vatable_base,
                 discount: 0.0,
-                input_vat,
+                input_vat: 0.0,
                 net_purchases,
                 qb_txn_id: txn_id,
                 synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
@@ -1846,12 +1902,12 @@ impl QbXmlParser {
                 vendor_tin: "102-334-556-000".to_string(),
                 vendor_name: "Petron Fuel Corporation".to_string(),
                 address: "San Miguel Ave, Mandaluyong City".to_string(),
-                description: "Diesel Fuel & Lubricants".to_string(),
+                description: "Fuel and Oil Expense".to_string(),
                 bill_no: "BILL-2023-089".to_string(),
                 amount: 125000.00,
-                discount: 0.00,
-                input_vat: 15000.00,
-                net_purchases: 140000.00,
+                discount: 1250.00,
+                input_vat: 0.00,
+                net_purchases: 123750.00,
                 qb_txn_id: Some("QB-BILL-2001".to_string()),
                 synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
             },
@@ -1862,12 +1918,12 @@ impl QbXmlParser {
                 vendor_tin: "205-998-112-000".to_string(),
                 vendor_name: "Toyota Pasig Service Center".to_string(),
                 address: "Ortigas Ave Ext, Pasig City".to_string(),
-                description: "Vehicle Maintenance & Parts".to_string(),
+                description: "Repairs & Maintenance".to_string(),
                 bill_no: "BILL-2023-104".to_string(),
                 amount: 84500.00,
-                discount: 4500.00,
-                input_vat: 9600.00,
-                net_purchases: 89600.00,
+                discount: 1690.00,
+                input_vat: 0.00,
+                net_purchases: 82810.00,
                 qb_txn_id: Some("QB-BILL-2002".to_string()),
                 synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
             },
