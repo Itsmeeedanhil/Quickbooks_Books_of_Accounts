@@ -975,7 +975,7 @@ export const ExportToolbar = ({
     }
   };
 
-  // Extract structured column headers, data rows, and summary totals across all journals
+  // Extract structured column headers, data rows, and summary totals across all journals (identical layout to xlsx)
   const getJournalDataRows = () => {
     let headers = [];
     let rows = [];
@@ -1114,18 +1114,22 @@ export const ExportToolbar = ({
         'Memo',
       ];
       let tDebit = 0, tCredit = 0;
-      data.forEach((item) => {
-        const debit = Number(item.debit) || 0;
-        const credit = Number(item.credit) || 0;
-        tDebit += debit;
-        tCredit += credit;
+      data.forEach((item, index) => {
+        tDebit += Number(item.debit) || 0;
+        tCredit += Number(item.credit) || 0;
+
+        const isFirstLine =
+          index === 0 ||
+          item.entry_no !== data[index - 1].entry_no ||
+          item.txn_date !== data[index - 1].txn_date;
+
         rows.push([
-          item.txn_date || '',
-          item.entry_no || '',
+          isFirstLine ? (item.txn_date || '') : '',
+          isFirstLine ? (item.entry_no || '') : '',
           item.account_code || '',
           cleanText(item.account_name || ''),
-          debit ? debit.toFixed(2) : '0.00',
-          credit ? credit.toFixed(2) : '0.00',
+          item.debit ? Number(item.debit).toFixed(2) : '',
+          item.credit ? Number(item.credit).toFixed(2) : '',
           cleanText(item.memo || ''),
         ]);
       });
@@ -1141,7 +1145,7 @@ export const ExportToolbar = ({
         'Credit',
         'Balance',
       ];
-      let tDebit = 0, tCredit = 0;
+      let grandDebit = 0, grandCredit = 0;
       data.forEach((item) => {
         if (item.row_type === 'header') {
           rows.push([
@@ -1160,24 +1164,24 @@ export const ExportToolbar = ({
           const debit = Number(item.debit) || 0;
           const credit = Number(item.credit) || 0;
           const balance = Number(item.balance) || 0;
-          tDebit += debit;
-          tCredit += credit;
+          grandDebit += debit;
+          grandCredit += credit;
           rows.push([
             cleanText(item.txn_type || ''),
             item.txn_date || '',
             item.ref_num || '',
             cleanText(item.name || ''),
             cleanText(item.description || ''),
-            debit ? debit.toFixed(2) : '0.00',
-            credit ? credit.toFixed(2) : '0.00',
-            balance ? balance.toFixed(2) : '0.00',
+            item.debit ? Number(item.debit).toFixed(2) : '',
+            item.credit ? Number(item.credit).toFixed(2) : '',
+            item.balance ? Number(item.balance).toFixed(2) : '',
           ]);
         }
       });
-      totals = ['TOTAL :', '', '', '', '', tDebit.toFixed(2), tCredit.toFixed(2), ''];
+      totals = ['TOTAL :', '', '', '', '', grandDebit.toFixed(2), grandCredit.toFixed(2), ''];
     }
 
-    return { headers, rows, totals };
+    return { headers, rows, totals, numCols: headers.length };
   };
 
   const escapeCsv = (val) => {
@@ -1194,41 +1198,54 @@ export const ExportToolbar = ({
     return String(val).replace(/[\r\n]+/g, ' ').replace(/\|/g, '-').trim();
   };
 
-  // Export CSV (.csv) with BIR Header, column headers, clean data, and totals
+  // Export CSV (.csv) with layout completely matching xlsx: BIR Header block, table headers, clean rows, and aligned totals
   const handleExportCSV = () => {
     try {
-      const { headers, rows, totals } = getJournalDataRows();
+      const { headers, rows, totals, numCols } = getJournalDataRows();
       const sanitizedPeriod = (periodEnded || 'Report').replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, '_');
       const fileName = `${journalTitle.replace(/\s+/g, '_')}_${sanitizedPeriod}.csv`;
 
-      const lines = [];
-      // BIR Company Header Block
-      lines.push(escapeCsv((company?.company_name || '').toUpperCase()));
-      lines.push(escapeCsv((company?.address || '').toUpperCase()));
-      lines.push(escapeCsv((company?.vat_reg_tin || '').toUpperCase()));
-      lines.push(escapeCsv((company?.software_name || '').toUpperCase()));
-      lines.push(escapeCsv((company?.representative_name || '').toUpperCase()));
-      lines.push(escapeCsv(company?.updated_at || ''));
-      lines.push('');
-      lines.push(escapeCsv(journalTitle.toUpperCase()));
-      lines.push(escapeCsv(`FOR THE MONTH ENDED ${(periodEnded || '').toUpperCase()}`));
-      lines.push(escapeCsv('(In Philippine Peso)'));
-      lines.push('');
+      const padRow = (firstVal) => {
+        const arr = new Array(numCols).fill('');
+        arr[0] = firstVal || '';
+        return arr;
+      };
 
-      // Column Headers
+      const lines = [];
+
+      // 1. BIR Company & Report Header Block (exact 11-row header block matching xlsx)
+      const headerBlock = [
+        (company?.company_name || '').toUpperCase(),
+        (company?.address || '').toUpperCase(),
+        (company?.vat_reg_tin || '').toUpperCase(),
+        (company?.software_name || '').toUpperCase(),
+        (company?.representative_name || '').toUpperCase(),
+        company?.updated_at || '',
+        '',
+        journalTitle.toUpperCase(),
+        `FOR THE MONTH ENDED ${(periodEnded || '').toUpperCase()}`,
+        '(In Philippine Peso)',
+        '',
+      ];
+
+      headerBlock.forEach((text) => {
+        lines.push(padRow(text).map(escapeCsv).join(','));
+      });
+
+      // 2. Table Column Headers
       lines.push(headers.map(escapeCsv).join(','));
 
-      // Data Rows
+      // 3. Data Rows
       rows.forEach((row) => {
         lines.push(row.map(escapeCsv).join(','));
       });
 
-      // Total Row
+      // 4. Summary Total Row
       if (totals) {
         lines.push(totals.map(escapeCsv).join(','));
       }
 
-      // Add UTF-8 BOM so Excel opens special characters correctly
+      // Add UTF-8 BOM so Excel opens special characters and numbers cleanly
       const csvContent = '\uFEFF' + lines.join('\r\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
