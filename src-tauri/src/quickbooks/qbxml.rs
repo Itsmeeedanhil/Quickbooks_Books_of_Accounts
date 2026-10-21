@@ -491,7 +491,7 @@ impl QbXmlParser {
         profile
     }
 
-    pub fn parse_sales_journal(xml: &str, period_ended: &str, mapping: &FieldMapping) -> Vec<SalesJournalEntry> {
+    pub fn parse_sales_journal(xml: &str, period_ended: &str, _mapping: &FieldMapping) -> Vec<SalesJournalEntry> {
         let mut entries = Vec::new();
         let customer_tins = Self::parse_customer_tins(xml);
 
@@ -553,9 +553,10 @@ impl QbXmlParser {
                 .and_then(|s| s.parse::<f64>().ok())
                 .filter(|&v| v > 0.0);
 
-            // Scan all invoice lines to detect gross amount, line item discounts, and descriptions
+            // Scan all invoice lines to detect gross amount, line item discounts, line tax, and descriptions
             let mut gross_amount = 0.0;
             let mut total_discount = 0.0;
+            let mut line_tax_amount = 0.0;
             let mut first_item_desc = String::new();
 
             let line_chunks: Vec<&str> = item_xml.split("<InvoiceLineRet>").skip(1).collect();
@@ -570,10 +571,23 @@ impl QbXmlParser {
                     .unwrap_or(0.0);
                 let line_amt = raw_amt * exchange_rate;
 
-                let is_discount = item_name.to_lowercase().contains("discount") || desc.to_lowercase().contains("discount");
+                let item_lower = item_name.to_lowercase();
+                let desc_lower = desc.to_lowercase();
+
+                let is_discount = item_lower.contains("discount") || desc_lower.contains("discount");
+                let is_tax = item_lower.contains("output tax") 
+                    || item_lower.contains("output vat")
+                    || item_lower.contains("sales tax")
+                    || item_lower.contains("evat")
+                    || item_lower.contains("value added tax")
+                    || (item_lower.contains("vat") && !item_lower.contains("private") && !item_lower.contains("elevation"))
+                    || desc_lower.contains("output tax")
+                    || desc_lower.contains("output vat");
 
                 if line_amt < 0.0 || is_discount {
                     total_discount += line_amt.abs();
+                } else if is_tax {
+                    line_tax_amount += line_amt;
                 } else if line_amt > 0.0 {
                     gross_amount += line_amt;
                     if first_item_desc.is_empty() && !desc.is_empty() {
@@ -593,6 +607,17 @@ impl QbXmlParser {
                 total_discount += raw_amt * exchange_rate;
             }
 
+            // Also check SalesTaxLineRet if present
+            let tax_chunks: Vec<&str> = item_xml.split("<SalesTaxLineRet>").skip(1).collect();
+            for t_chunk in tax_chunks {
+                let end_t = t_chunk.find("</SalesTaxLineRet>").unwrap_or(t_chunk.len());
+                let t_xml = &t_chunk[..end_t];
+                let raw_amt: f64 = Self::extract_tag_value(t_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                line_tax_amount += raw_amt * exchange_rate;
+            }
+
             let subtotal: f64 = Self::extract_tag_value(item_xml, "Subtotal")
                 .and_then(|s| s.parse::<f64>().ok())
                 .map(|v| v * exchange_rate)
@@ -603,12 +628,20 @@ impl QbXmlParser {
                 .map(|v| v * exchange_rate)
                 .unwrap_or(0.0);
 
+            // Detect VAT from transaction: if there is SalesTaxTotal or line tax, use it; otherwise strictly 0.0
+            let detected_tax = if total_tax > 0.0 {
+                total_tax
+            } else if line_tax_amount > 0.0 {
+                line_tax_amount
+            } else {
+                0.0
+            };
+            let vat_amount = ((detected_tax) * 100.0).round() / 100.0;
+
             let total_amount: f64 = if let Some(ht) = home_total {
                 ht
             } else {
                 Self::extract_tag_value(item_xml, "TotalAmount")
-                    .or_else(|| Self::extract_tag_value(item_xml, "AppliedAmount"))
-                    .or_else(|| Self::extract_tag_value(item_xml, "BalanceRemaining"))
                     .and_then(|s| s.parse::<f64>().ok())
                     .map(|v| v * exchange_rate)
                     .unwrap_or(0.0)
@@ -623,27 +656,17 @@ impl QbXmlParser {
                 ((gross_amount) * 100.0).round() / 100.0
             } else if subtotal > 0.0 {
                 ((subtotal + total_discount) * 100.0).round() / 100.0
-            } else if total_amount > 0.0 && total_tax > 0.0 {
-                (((total_amount - total_tax) + total_discount) * 100.0).round() / 100.0
+            } else if total_amount > 0.0 {
+                (((total_amount - vat_amount) + total_discount) * 100.0).round() / 100.0
             } else {
-                ((total_amount + total_discount) * 100.0).round() / 100.0
+                0.0
             };
 
             let discount = ((total_discount) * 100.0).round() / 100.0;
-            let vatable_base = (amount - discount).max(0.0);
-
-            let vat_amount = if total_tax > 0.0 {
-                total_tax
-            } else if mapping.auto_compute_vat {
-                ((vatable_base * mapping.default_vat_rate) * 100.0).round() / 100.0
-            } else {
-                ((vatable_base * 0.12) * 100.0).round() / 100.0
-            };
-
-            let net_sales = if total_amount > 0.0 {
+            let net_sales = if total_amount > 0.0 && total_amount >= (amount - discount) {
                 total_amount
             } else {
-                ((vatable_base + vat_amount) * 100.0).round() / 100.0
+                ((amount - discount + vat_amount) * 100.0).round() / 100.0
             };
 
             entries.push(SalesJournalEntry {
@@ -700,9 +723,18 @@ impl QbXmlParser {
                     .unwrap_or(0.0)
             };
 
+            let total_tax: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|v| v * exchange_rate)
+                .unwrap_or(0.0);
+
             // Credit memo reduces sales (represented with negative or credit value)
-            let vatable_base = -total_amount.abs();
-            let vat_amount = ((vatable_base * mapping.default_vat_rate) * 100.0).round() / 100.0;
+            let vat_amount = if total_tax > 0.0 {
+                -((total_tax * 100.0).round() / 100.0).abs()
+            } else {
+                0.0
+            };
+            let vatable_base = -(total_amount.abs() - vat_amount.abs()).max(0.0);
             let net_sales = ((vatable_base + vat_amount) * 100.0).round() / 100.0;
 
             entries.push(SalesJournalEntry {
@@ -771,6 +803,7 @@ impl QbXmlParser {
 
             let mut gross_amount = 0.0;
             let mut total_discount = 0.0;
+            let mut line_tax_amount = 0.0;
             let mut first_item_desc = String::new();
 
             let line_chunks: Vec<&str> = item_xml.split("<SalesReceiptLineRet>").skip(1).collect();
@@ -785,10 +818,23 @@ impl QbXmlParser {
                     .unwrap_or(0.0);
                 let line_amt = raw_amt * exchange_rate;
 
-                let is_discount = item_name.to_lowercase().contains("discount") || desc.to_lowercase().contains("discount");
+                let item_lower = item_name.to_lowercase();
+                let desc_lower = desc.to_lowercase();
+
+                let is_discount = item_lower.contains("discount") || desc_lower.contains("discount");
+                let is_tax = item_lower.contains("output tax") 
+                    || item_lower.contains("output vat")
+                    || item_lower.contains("sales tax")
+                    || item_lower.contains("evat")
+                    || item_lower.contains("value added tax")
+                    || (item_lower.contains("vat") && !item_lower.contains("private") && !item_lower.contains("elevation"))
+                    || desc_lower.contains("output tax")
+                    || desc_lower.contains("output vat");
 
                 if line_amt < 0.0 || is_discount {
                     total_discount += line_amt.abs();
+                } else if is_tax {
+                    line_tax_amount += line_amt;
                 } else if line_amt > 0.0 {
                     gross_amount += line_amt;
                     if first_item_desc.is_empty() && !desc.is_empty() {
@@ -807,6 +853,16 @@ impl QbXmlParser {
                 total_discount += raw_amt * exchange_rate;
             }
 
+            let tax_chunks: Vec<&str> = item_xml.split("<SalesTaxLineRet>").skip(1).collect();
+            for t_chunk in tax_chunks {
+                let end_t = t_chunk.find("</SalesTaxLineRet>").unwrap_or(t_chunk.len());
+                let t_xml = &t_chunk[..end_t];
+                let raw_amt: f64 = Self::extract_tag_value(t_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                line_tax_amount += raw_amt * exchange_rate;
+            }
+
             let subtotal: f64 = Self::extract_tag_value(item_xml, "Subtotal")
                 .and_then(|s| s.parse::<f64>().ok())
                 .map(|v| v * exchange_rate)
@@ -816,6 +872,16 @@ impl QbXmlParser {
                 .and_then(|s| s.parse::<f64>().ok())
                 .map(|v| v * exchange_rate)
                 .unwrap_or(0.0);
+
+            // Detect VAT from transaction: if there is SalesTaxTotal or line tax, use it; otherwise strictly 0.0
+            let detected_tax = if total_tax > 0.0 {
+                total_tax
+            } else if line_tax_amount > 0.0 {
+                line_tax_amount
+            } else {
+                0.0
+            };
+            let vat_amount = ((detected_tax) * 100.0).round() / 100.0;
 
             let total_amount: f64 = if let Some(ht) = home_total {
                 ht
@@ -835,25 +901,17 @@ impl QbXmlParser {
                 ((gross_amount) * 100.0).round() / 100.0
             } else if subtotal > 0.0 {
                 ((subtotal + total_discount) * 100.0).round() / 100.0
-            } else if total_amount > 0.0 && total_tax > 0.0 {
-                (((total_amount - total_tax) + total_discount) * 100.0).round() / 100.0
+            } else if total_amount > 0.0 {
+                (((total_amount - vat_amount) + total_discount) * 100.0).round() / 100.0
             } else {
-                ((total_amount + total_discount) * 100.0).round() / 100.0
+                0.0
             };
 
             let discount = ((total_discount) * 100.0).round() / 100.0;
-            let vatable_base = (amount - discount).max(0.0);
-
-            let vat_amount = if total_tax > 0.0 {
-                total_tax
-            } else {
-                ((vatable_base * 0.12) * 100.0).round() / 100.0
-            };
-
-            let net_sales = if total_amount > 0.0 {
+            let net_sales = if total_amount > 0.0 && total_amount >= (amount - discount) {
                 total_amount
             } else {
-                ((vatable_base + vat_amount) * 100.0).round() / 100.0
+                ((amount - discount + vat_amount) * 100.0).round() / 100.0
             };
 
             entries.push(SalesJournalEntry {
