@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Printer, FileSpreadsheet, FileText, Database, CheckCircle2, AlertCircle, X } from 'lucide-react';
+import { Printer, FileSpreadsheet, FileText, Database, CheckCircle2, AlertCircle, X, FileDown, FileCode } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -975,6 +975,338 @@ export const ExportToolbar = ({
     }
   };
 
+  // Extract structured column headers, data rows, and summary totals across all journals
+  const getJournalDataRows = () => {
+    let headers = [];
+    let rows = [];
+    let totals = null;
+
+    if (activeJournal === 'sales') {
+      headers = [
+        'Date',
+        "Customer's TIN",
+        'Customer Name',
+        'Address',
+        'Description',
+        'Sales Invoice No.',
+        'Amount',
+        'Discount',
+        'VAT Amount (Output Tax)',
+        'Net Sales',
+      ];
+      let tAmt = 0, tDisc = 0, tVat = 0, tNet = 0;
+      data.forEach((item) => {
+        const amt = Number(item.amount) || 0;
+        const disc = Number(item.discount) || 0;
+        const vat = Number(item.vat_amount) || 0;
+        const net = Number(item.net_sales) || 0;
+        tAmt += amt;
+        tDisc += disc;
+        tVat += vat;
+        tNet += net;
+        rows.push([
+          item.txn_date || '',
+          item.customer_tin || '',
+          cleanText(item.customer_name || ''),
+          cleanText(item.address || ''),
+          cleanText(item.description || ''),
+          item.sales_invoice_no || '',
+          amt.toFixed(2),
+          disc.toFixed(2),
+          vat.toFixed(2),
+          net.toFixed(2),
+        ]);
+      });
+      totals = ['TOTAL :', '', '', '', '', '', tAmt.toFixed(2), tDisc.toFixed(2), tVat.toFixed(2), tNet.toFixed(2)];
+    } else if (activeJournal === 'purchase') {
+      headers = [
+        'Date',
+        "Vendor's TIN",
+        'Vendor Name',
+        'Address',
+        'Description',
+        'Bill No.',
+        'Amount',
+        'Withholding Tax',
+        'Net Purchases',
+      ];
+      let tAmt = 0, tDisc = 0, tNet = 0;
+      data.forEach((item) => {
+        const amt = Number(item.amount) || 0;
+        const disc = Number(item.discount) || 0;
+        const net = Number(item.net_purchases) || 0;
+        tAmt += amt;
+        tDisc += disc;
+        tNet += net;
+        rows.push([
+          item.txn_date || '',
+          item.vendor_tin || '',
+          cleanText(item.vendor_name || ''),
+          cleanText(item.address || ''),
+          cleanText(item.description || ''),
+          item.bill_no || '',
+          amt.toFixed(2),
+          disc.toFixed(2),
+          net.toFixed(2),
+        ]);
+      });
+      totals = ['TOTAL :', '', '', '', '', '', tAmt.toFixed(2), tDisc.toFixed(2), tNet.toFixed(2)];
+    } else if (activeJournal === 'cash_receipts') {
+      headers = [
+        'Date',
+        "Customer's TIN",
+        'Customer Name',
+        'OR No.',
+        'Description',
+        'Gross Amount',
+        'Net Collection',
+      ];
+      let tGross = 0, tNet = 0;
+      data.forEach((item) => {
+        const gross = Number(item.gross_amount) || 0;
+        const net = Number(item.net_collection) || 0;
+        tGross += gross;
+        tNet += net;
+        rows.push([
+          item.txn_date || '',
+          item.customer_tin || '',
+          cleanText(item.customer_name || ''),
+          item.or_no || '',
+          cleanText(item.description || ''),
+          gross.toFixed(2),
+          net.toFixed(2),
+        ]);
+      });
+      totals = ['TOTAL :', '', '', '', '', tGross.toFixed(2), tNet.toFixed(2)];
+    } else if (activeJournal === 'cash_disbursements') {
+      headers = [
+        'Date',
+        'Payee Name',
+        'Check No.',
+        'Description',
+        'Gross Amount',
+        'Net Disbursement',
+      ];
+      let tGross = 0, tNet = 0;
+      data.forEach((item) => {
+        const gross = Number(item.gross_amount) || 0;
+        const net = Number(item.net_disbursement) || 0;
+        tGross += gross;
+        tNet += net;
+        rows.push([
+          item.txn_date || '',
+          cleanText(item.payee_name || ''),
+          item.check_no || '',
+          cleanText(item.description || ''),
+          gross.toFixed(2),
+          net.toFixed(2),
+        ]);
+      });
+      totals = ['TOTAL :', '', '', '', tGross.toFixed(2), tNet.toFixed(2)];
+    } else if (activeJournal === 'general_journal') {
+      headers = [
+        'Date',
+        'Entry No.',
+        'Account Code',
+        'Account Title / Particulars',
+        'Debit',
+        'Credit',
+        'Memo',
+      ];
+      let tDebit = 0, tCredit = 0;
+      data.forEach((item) => {
+        const debit = Number(item.debit) || 0;
+        const credit = Number(item.credit) || 0;
+        tDebit += debit;
+        tCredit += credit;
+        rows.push([
+          item.txn_date || '',
+          item.entry_no || '',
+          item.account_code || '',
+          cleanText(item.account_name || ''),
+          debit ? debit.toFixed(2) : '0.00',
+          credit ? credit.toFixed(2) : '0.00',
+          cleanText(item.memo || ''),
+        ]);
+      });
+      totals = ['TOTAL :', '', '', '', tDebit.toFixed(2), tCredit.toFixed(2), ''];
+    } else if (activeJournal === 'general_ledger') {
+      headers = [
+        'Type',
+        'Date',
+        'Num',
+        'Name',
+        'Description',
+        'Debit',
+        'Credit',
+        'Balance',
+      ];
+      let tDebit = 0, tCredit = 0;
+      data.forEach((item) => {
+        if (item.row_type === 'header') {
+          rows.push([
+            cleanText(item.account_group || item.name || ''),
+            '', '', '', '', '', '', ''
+          ]);
+        } else if (item.row_type === 'subtotal' || item.row_type === 'total') {
+          rows.push([
+            cleanText(item.name || `Total ${item.account_group}`),
+            '', '', '', '',
+            Number(item.debit || 0).toFixed(2),
+            Number(item.credit || 0).toFixed(2),
+            Number(item.balance || 0).toFixed(2),
+          ]);
+        } else {
+          const debit = Number(item.debit) || 0;
+          const credit = Number(item.credit) || 0;
+          const balance = Number(item.balance) || 0;
+          tDebit += debit;
+          tCredit += credit;
+          rows.push([
+            cleanText(item.txn_type || ''),
+            item.txn_date || '',
+            item.ref_num || '',
+            cleanText(item.name || ''),
+            cleanText(item.description || ''),
+            debit ? debit.toFixed(2) : '0.00',
+            credit ? credit.toFixed(2) : '0.00',
+            balance ? balance.toFixed(2) : '0.00',
+          ]);
+        }
+      });
+      totals = ['TOTAL :', '', '', '', '', tDebit.toFixed(2), tCredit.toFixed(2), ''];
+    }
+
+    return { headers, rows, totals };
+  };
+
+  const escapeCsv = (val) => {
+    if (val === null || val === undefined) return '';
+    const s = String(val);
+    if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
+  const escapeDat = (val) => {
+    if (val === null || val === undefined) return '';
+    return String(val).replace(/[\r\n]+/g, ' ').replace(/\|/g, '-').trim();
+  };
+
+  // Export CSV (.csv) with BIR Header, column headers, clean data, and totals
+  const handleExportCSV = () => {
+    try {
+      const { headers, rows, totals } = getJournalDataRows();
+      const sanitizedPeriod = (periodEnded || 'Report').replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, '_');
+      const fileName = `${journalTitle.replace(/\s+/g, '_')}_${sanitizedPeriod}.csv`;
+
+      const lines = [];
+      // BIR Company Header Block
+      lines.push(escapeCsv((company?.company_name || '').toUpperCase()));
+      lines.push(escapeCsv((company?.address || '').toUpperCase()));
+      lines.push(escapeCsv((company?.vat_reg_tin || '').toUpperCase()));
+      lines.push(escapeCsv((company?.software_name || '').toUpperCase()));
+      lines.push(escapeCsv((company?.representative_name || '').toUpperCase()));
+      lines.push(escapeCsv(company?.updated_at || ''));
+      lines.push('');
+      lines.push(escapeCsv(journalTitle.toUpperCase()));
+      lines.push(escapeCsv(`FOR THE MONTH ENDED ${(periodEnded || '').toUpperCase()}`));
+      lines.push(escapeCsv('(In Philippine Peso)'));
+      lines.push('');
+
+      // Column Headers
+      lines.push(headers.map(escapeCsv).join(','));
+
+      // Data Rows
+      rows.forEach((row) => {
+        lines.push(row.map(escapeCsv).join(','));
+      });
+
+      // Total Row
+      if (totals) {
+        lines.push(totals.map(escapeCsv).join(','));
+      }
+
+      // Add UTF-8 BOM so Excel opens special characters correctly
+      const csvContent = '\uFEFF' + lines.join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      setNotification({
+        type: 'csv',
+        title: 'CSV File Downloaded Successfully!',
+        fileName: fileName,
+        count: data.length,
+      });
+    } catch (err) {
+      console.error('Export CSV error:', err);
+      setNotification({
+        type: 'error',
+        title: 'Failed to export CSV file',
+        fileName: err.message || 'Unknown error occurred',
+      });
+    }
+  };
+
+  // Export DAT (.dat) official BIR CAS pipe-delimited data file
+  const handleExportDAT = () => {
+    try {
+      const { headers, rows, totals } = getJournalDataRows();
+      const sanitizedPeriod = (periodEnded || 'Report').replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, '_');
+      const fileName = `${journalTitle.replace(/\s+/g, '_')}_${sanitizedPeriod}.dat`;
+
+      const lines = [];
+      // BIR Header control comment / line
+      lines.push(`H|${escapeDat((company?.company_name || '').toUpperCase())}|${escapeDat(company?.vat_reg_tin || '')}|${escapeDat(journalTitle.toUpperCase())}|${escapeDat(periodEnded || '')}|PHP`);
+      
+      // Column Header Line
+      lines.push(headers.map(escapeDat).join('|'));
+
+      // Detail Data Lines
+      rows.forEach((row) => {
+        lines.push(row.map(escapeDat).join('|'));
+      });
+
+      // Control Total Line
+      if (totals) {
+        lines.push(totals.map(escapeDat).join('|'));
+      }
+
+      const datContent = lines.join('\r\n');
+      const blob = new Blob([datContent], { type: 'text/plain;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      setNotification({
+        type: 'dat',
+        title: 'DAT File Downloaded Successfully!',
+        fileName: fileName,
+        count: data.length,
+      });
+    } catch (err) {
+      console.error('Export DAT error:', err);
+      setNotification({
+        type: 'error',
+        title: 'Failed to export DAT file',
+        fileName: err.message || 'Unknown error occurred',
+      });
+    }
+  };
+
   return (
     <>
       {/* Export Toolbar */}
@@ -998,6 +1330,24 @@ export const ExportToolbar = ({
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
             <span>Export Excel (.xlsx)</span>
+          </button>
+
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 active:bg-slate-100 text-teal-800 text-xs font-semibold rounded-lg border border-teal-300 shadow-sm transition"
+            title="Export as Comma-Separated Values (.csv)"
+          >
+            <FileDown className="w-3.5 h-3.5 text-teal-600" />
+            <span>Export CSV (.csv)</span>
+          </button>
+
+          <button
+            onClick={handleExportDAT}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 active:bg-slate-100 text-purple-800 text-xs font-semibold rounded-lg border border-purple-300 shadow-sm transition"
+            title="Export official BIR CAS pipe-delimited data file (.dat)"
+          >
+            <FileCode className="w-3.5 h-3.5 text-purple-600" />
+            <span>Export DAT (.dat)</span>
           </button>
 
           <button
@@ -1028,6 +1378,10 @@ export const ExportToolbar = ({
                 ? 'bg-emerald-500/20 text-emerald-400'
                 : notification.type === 'pdf'
                 ? 'bg-red-500/20 text-red-400'
+                : notification.type === 'csv'
+                ? 'bg-teal-500/20 text-teal-400'
+                : notification.type === 'dat'
+                ? 'bg-purple-500/20 text-purple-400'
                 : 'bg-amber-500/20 text-amber-400'
             }`}
           >
@@ -1035,6 +1389,10 @@ export const ExportToolbar = ({
               <FileSpreadsheet className="w-5 h-5" />
             ) : notification.type === 'pdf' ? (
               <FileText className="w-5 h-5" />
+            ) : notification.type === 'csv' ? (
+              <FileDown className="w-5 h-5" />
+            ) : notification.type === 'dat' ? (
+              <FileCode className="w-5 h-5" />
             ) : (
               <AlertCircle className="w-5 h-5" />
             )}
