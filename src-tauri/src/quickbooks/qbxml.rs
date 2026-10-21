@@ -168,7 +168,10 @@ impl QbXmlBuilder {
     </VendorCreditQueryRq>
     <VendorQueryRq requestID="22">
       <OwnerID>0</OwnerID>
-    </VendorQueryRq>"#,
+    </VendorQueryRq>
+    <ItemQueryRq requestID="23">
+      <ActiveStatus>All</ActiveStatus>
+    </ItemQueryRq>"#,
             filter, filter
         );
         Self::wrap_request(&inner)
@@ -224,7 +227,10 @@ impl QbXmlBuilder {
     <CheckQueryRq requestID="41">
 {}
       <IncludeLineItems>true</IncludeLineItems>
-    </CheckQueryRq>"#,
+    </CheckQueryRq>
+    <ItemQueryRq requestID="42">
+      <ActiveStatus>All</ActiveStatus>
+    </ItemQueryRq>"#,
             filter, filter
         );
         Self::wrap_request(&inner)
@@ -367,6 +373,107 @@ impl QbXmlParser {
         None
     }
 
+    pub fn parse_item_cogs_accounts(xml: &str) -> HashMap<String, String> {
+        let mut item_map = HashMap::new();
+        let item_tags = [
+            "ItemInventoryRet",
+            "ItemInventoryAssemblyRet",
+            "ItemNonInventoryRet",
+            "ItemServiceRet",
+            "ItemOtherChargeRet",
+            "ItemFixedAssetRet",
+        ];
+
+        for tag in item_tags {
+            let open_tag = format!("<{}>", tag);
+            let close_tag = format!("</{}>", tag);
+            let chunks: Vec<&str> = xml.split(&open_tag).skip(1).collect();
+
+            for chunk in chunks {
+                let end_idx = chunk.find(&close_tag).unwrap_or(chunk.len());
+                let item_xml = &chunk[..end_idx];
+
+                // Extract the COGS Account (or Expense / Purchase Account for non-inventory items)
+                let cogs_acct = Self::extract_nested_tag(item_xml, "COGSAccountRef", "FullName")
+                    .or_else(|| Self::extract_nested_tag(item_xml, "ExpenseAccountRef", "FullName"))
+                    .or_else(|| Self::extract_nested_tag(item_xml, "AccountRef", "FullName"))
+                    .or_else(|| Self::extract_nested_tag(item_xml, "AssetAccountRef", "FullName"));
+
+                if let Some(acct) = cogs_acct {
+                    let clean_acct = Self::clean_qb_text(&acct);
+                    if !clean_acct.is_empty() {
+                        if let Some(list_id) = Self::extract_tag_value(item_xml, "ListID") {
+                            let clean_id = list_id.trim();
+                            if !clean_id.is_empty() {
+                                item_map.insert(format!("ID:{}", clean_id), clean_acct.clone());
+                            }
+                        }
+                        if let Some(full_name) = Self::extract_tag_value(item_xml, "FullName") {
+                            let clean_full = Self::clean_qb_text(&full_name);
+                            if !clean_full.is_empty() {
+                                item_map.insert(clean_full.to_lowercase(), clean_acct.clone());
+                            }
+                        }
+                        if let Some(name) = Self::extract_tag_value(item_xml, "Name") {
+                            let clean_name = Self::clean_qb_text(&name);
+                            if !clean_name.is_empty() {
+                                item_map.insert(clean_name.to_lowercase(), clean_acct.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item_map
+    }
+
+    pub fn resolve_item_cogs_account(
+        line_xml: &str,
+        item_name: &str,
+        item_cogs_map: &HashMap<String, String>,
+    ) -> String {
+        // 1. Check if the transaction line explicitly overrides the item account
+        if let Some(override_acct) = Self::extract_nested_tag(line_xml, "OverrideItemAccountRef", "FullName") {
+            let clean = Self::clean_qb_text(&override_acct);
+            if !clean.is_empty() {
+                return clean;
+            }
+        }
+
+        // 2. Lookup by ItemRef -> ListID in ItemQueryRs map
+        if let Some(list_id) = Self::extract_nested_tag(line_xml, "ItemRef", "ListID") {
+            let key = format!("ID:{}", list_id.trim());
+            if let Some(acct) = item_cogs_map.get(&key) {
+                if !acct.is_empty() {
+                    return acct.clone();
+                }
+            }
+        }
+
+        // 3. Lookup by ItemRef -> FullName (case-insensitive) in ItemQueryRs map
+        let clean_name = Self::clean_qb_text(item_name);
+        if !clean_name.is_empty() {
+            let lower = clean_name.to_lowercase();
+            if let Some(acct) = item_cogs_map.get(&lower) {
+                if !acct.is_empty() {
+                    return acct.clone();
+                }
+            }
+            if let Some(leaf) = lower.rsplit(':').next() {
+                let leaf_trimmed = leaf.trim();
+                if let Some(acct) = item_cogs_map.get(leaf_trimmed) {
+                    if !acct.is_empty() {
+                        return acct.clone();
+                    }
+                }
+            }
+        }
+
+        // 4. Default fallback to the standard COGS account name ("Purchases")
+        "Purchases".to_string()
+    }
+
     pub fn is_known_account_or_memo(part: &str) -> bool {
         let p = part.trim();
         if p.is_empty() {
@@ -380,6 +487,7 @@ impl QbXmlParser {
         }
         let p_lower = p.to_lowercase();
         let known = [
+            "purchases",
             "uncategorized expenses",
             "cost of goods sold",
             "cip - overhead and indirect exp",
@@ -421,7 +529,7 @@ impl QbXmlParser {
     pub fn normalize_purchase_description(desc: &str) -> String {
         let trimmed = desc.trim();
         if trimmed.is_empty() {
-            return "Cost of Goods Sold".to_string();
+            return "Purchases".to_string();
         }
         if trimmed.starts_with("Payroll for") || trimmed.starts_with("Payroll ") {
             return trimmed.to_string();
@@ -432,7 +540,9 @@ impl QbXmlParser {
         let mut has_item = false;
 
         for part in parts {
-            if Self::is_known_account_or_memo(part) {
+            if part.eq_ignore_ascii_case("Cost of Goods Sold") {
+                has_item = true;
+            } else if Self::is_known_account_or_memo(part) {
                 let part_clean = part.to_string();
                 if !accounts.contains(&part_clean) {
                     accounts.push(part_clean);
@@ -442,12 +552,12 @@ impl QbXmlParser {
             }
         }
 
-        if has_item && !accounts.iter().any(|a| a.eq_ignore_ascii_case("Cost of Goods Sold")) {
-            accounts.insert(0, "Cost of Goods Sold".to_string());
+        if has_item && !accounts.iter().any(|a| a.eq_ignore_ascii_case("Purchases") || a.to_lowercase().starts_with("purchases:")) {
+            accounts.insert(0, "Purchases".to_string());
         }
 
         if accounts.is_empty() {
-            "Cost of Goods Sold".to_string()
+            "Purchases".to_string()
         } else {
             accounts.join(", ")
         }
@@ -1024,6 +1134,7 @@ impl QbXmlParser {
     pub fn parse_purchase_journal(xml: &str, period_ended: &str, _mapping: &FieldMapping) -> Vec<PurchaseJournalEntry> {
         let mut entries = Vec::new();
         let vendor_tins = Self::parse_vendor_tins(xml);
+        let item_cogs_map = Self::parse_item_cogs_accounts(xml);
 
         let bill_chunks: Vec<&str> = xml.split("<BillRet>").skip(1).collect();
         for chunk in bill_chunks {
@@ -1106,12 +1217,7 @@ impl QbXmlParser {
                     total_wtax += line_amt.abs();
                 } else if line_amt > 0.0 {
                     gross_amount += line_amt;
-                    let item_account = if let Some(override_acct) = Self::extract_nested_tag(line_xml, "OverrideItemAccountRef", "FullName") {
-                        let clean = Self::clean_qb_text(&override_acct);
-                        if !clean.is_empty() { clean } else { "Cost of Goods Sold".to_string() }
-                    } else {
-                        "Cost of Goods Sold".to_string()
-                    };
+                    let item_account = Self::resolve_item_cogs_account(line_xml, &item_name, &item_cogs_map);
                     if !line_accounts.contains(&item_account) {
                         line_accounts.push(item_account);
                     }
@@ -1202,16 +1308,15 @@ impl QbXmlParser {
             };
 
             let bill_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
-            let raw_desc = if !line_accounts.is_empty() {
+            let description = if !line_accounts.is_empty() {
                 line_accounts.join(", ")
             } else if !bill_memo.trim().is_empty() {
                 Self::clean_qb_text(&bill_memo)
             } else if !first_item_desc.is_empty() {
                 Self::clean_qb_text(&first_item_desc)
             } else {
-                "Cost of Goods Sold".to_string()
+                "Purchases".to_string()
             };
-            let description = Self::normalize_purchase_description(&raw_desc);
 
             let discount = ((total_wtax) * 100.0).round() / 100.0;
 
@@ -1277,25 +1382,20 @@ impl QbXmlParser {
             for i_chunk in item_chunks {
                 let end_i = i_chunk.find("</ItemLineRet>").unwrap_or(i_chunk.len());
                 let line_xml = &i_chunk[..end_i];
-                let item_account = if let Some(override_acct) = Self::extract_nested_tag(line_xml, "OverrideItemAccountRef", "FullName") {
-                    let clean = Self::clean_qb_text(&override_acct);
-                    if !clean.is_empty() { clean } else { "Cost of Goods Sold".to_string() }
-                } else {
-                    "Cost of Goods Sold".to_string()
-                };
+                let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
+                let item_account = Self::resolve_item_cogs_account(line_xml, &item_name, &item_cogs_map);
                 if !vc_line_accounts.contains(&item_account) {
                     vc_line_accounts.push(item_account);
                 }
             }
             let vc_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
-            let raw_desc = if !vc_line_accounts.is_empty() {
+            let description = if !vc_line_accounts.is_empty() {
                 vc_line_accounts.join(", ")
             } else if !vc_memo.is_empty() {
                 Self::clean_qb_text(&vc_memo)
             } else {
-                "Cost of Goods Sold".to_string()
+                "Purchases".to_string()
             };
-            let description = Self::normalize_purchase_description(&raw_desc);
 
             let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
                 .and_then(|s| s.parse::<f64>().ok())
@@ -1525,6 +1625,7 @@ impl QbXmlParser {
 
     pub fn parse_cash_disbursements_journal(xml: &str, period_ended: &str) -> Vec<CashDisbursementsJournalEntry> {
         let mut entries = Vec::new();
+        let item_cogs_map = Self::parse_item_cogs_accounts(xml);
 
         // 1. Standard Checks (<CheckRet>)
         let chk_chunks: Vec<&str> = xml.split("<CheckRet>").skip(1).collect();
@@ -1578,18 +1679,14 @@ impl QbXmlParser {
                 }
             }
 
-            // Extract Item lines if present (mapped to account or Cost of Goods Sold)
+            // Extract Item lines if present (mapped to COGS / Expense account)
             let item_chunks: Vec<&str> = item_xml.split("<ItemLineRet>").skip(1).collect();
             for i_chunk in item_chunks {
                 let end_i = i_chunk.find("</ItemLineRet>").unwrap_or(i_chunk.len());
                 let line_xml = &i_chunk[..end_i];
 
-                let item_account = if let Some(override_acct) = Self::extract_nested_tag(line_xml, "OverrideItemAccountRef", "FullName") {
-                    let clean = Self::clean_qb_text(&override_acct);
-                    if !clean.is_empty() { clean } else { "Cost of Goods Sold".to_string() }
-                } else {
-                    "Cost of Goods Sold".to_string()
-                };
+                let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
+                let item_account = Self::resolve_item_cogs_account(line_xml, &item_name, &item_cogs_map);
                 if !line_accounts.contains(&item_account) {
                     line_accounts.push(item_account);
                 }
