@@ -367,6 +367,92 @@ impl QbXmlParser {
         None
     }
 
+    pub fn is_known_account_or_memo(part: &str) -> bool {
+        let p = part.trim();
+        if p.is_empty() {
+            return false;
+        }
+        if p.starts_with("Payroll for") || p.starts_with("Payroll ") {
+            return true;
+        }
+        if p.contains(':') {
+            return true;
+        }
+        let p_lower = p.to_lowercase();
+        let known = [
+            "uncategorized expenses",
+            "cost of goods sold",
+            "cip - overhead and indirect exp",
+            "transportation and travel",
+            "equipment rental",
+            "equipment rental.",
+            "banquet rental",
+            "banquet expense",
+            "allowances",
+            "sales and marketing",
+            "commission expense",
+            "repairs & maintenance",
+            "repairs and maintenance",
+            "due from affilliates -caliraya",
+            "due from affilliates - caliraya",
+            "operating supplies",
+            "other miscellaneuos expense",
+            "other miscellaneous expense",
+            "purchase of goods / services",
+            "13th month pay",
+            "waste removal",
+            "pest control",
+            "preventive maintenance",
+            "bank charges",
+            "employee benefits",
+            "taxes and licenses",
+            "communication",
+            "utilities",
+            "professional fees",
+            "rental expense",
+            "office supplies",
+            "insurance expense",
+            "security services",
+            "janitorial services",
+        ];
+        known.iter().any(|&k| p_lower == k)
+    }
+
+    pub fn normalize_purchase_description(desc: &str) -> String {
+        let trimmed = desc.trim();
+        if trimmed.is_empty() {
+            return "Cost of Goods Sold".to_string();
+        }
+        if trimmed.starts_with("Payroll for") || trimmed.starts_with("Payroll ") {
+            return trimmed.to_string();
+        }
+
+        let parts: Vec<&str> = trimmed.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let mut accounts: Vec<String> = Vec::new();
+        let mut has_item = false;
+
+        for part in parts {
+            if Self::is_known_account_or_memo(part) {
+                let part_clean = part.to_string();
+                if !accounts.contains(&part_clean) {
+                    accounts.push(part_clean);
+                }
+            } else {
+                has_item = true;
+            }
+        }
+
+        if has_item && !accounts.iter().any(|a| a.eq_ignore_ascii_case("Cost of Goods Sold")) {
+            accounts.insert(0, "Cost of Goods Sold".to_string());
+        }
+
+        if accounts.is_empty() {
+            "Cost of Goods Sold".to_string()
+        } else {
+            accounts.join(", ")
+        }
+    }
+
     pub fn parse_customer_tins(xml: &str) -> HashMap<String, String> {
         let mut tin_map = HashMap::new();
         let chunks: Vec<&str> = xml.split("<CustomerRet>").skip(1).collect();
@@ -1020,9 +1106,14 @@ impl QbXmlParser {
                     total_wtax += line_amt.abs();
                 } else if line_amt > 0.0 {
                     gross_amount += line_amt;
-                    let clean = Self::clean_qb_text(&item_name);
-                    if !clean.is_empty() && !line_accounts.contains(&clean) {
-                        line_accounts.push(clean);
+                    let item_account = if let Some(override_acct) = Self::extract_nested_tag(line_xml, "OverrideItemAccountRef", "FullName") {
+                        let clean = Self::clean_qb_text(&override_acct);
+                        if !clean.is_empty() { clean } else { "Cost of Goods Sold".to_string() }
+                    } else {
+                        "Cost of Goods Sold".to_string()
+                    };
+                    if !line_accounts.contains(&item_account) {
+                        line_accounts.push(item_account);
                     }
                     if first_item_desc.is_empty() && !desc.is_empty() {
                         first_item_desc = desc;
@@ -1111,15 +1202,16 @@ impl QbXmlParser {
             };
 
             let bill_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
-            let description = if !line_accounts.is_empty() {
+            let raw_desc = if !line_accounts.is_empty() {
                 line_accounts.join(", ")
             } else if !bill_memo.trim().is_empty() {
                 Self::clean_qb_text(&bill_memo)
             } else if !first_item_desc.is_empty() {
                 Self::clean_qb_text(&first_item_desc)
             } else {
-                "Purchase of Goods / Services".to_string()
+                "Cost of Goods Sold".to_string()
             };
+            let description = Self::normalize_purchase_description(&raw_desc);
 
             let discount = ((total_wtax) * 100.0).round() / 100.0;
 
@@ -1185,21 +1277,25 @@ impl QbXmlParser {
             for i_chunk in item_chunks {
                 let end_i = i_chunk.find("</ItemLineRet>").unwrap_or(i_chunk.len());
                 let line_xml = &i_chunk[..end_i];
-                if let Some(item) = Self::extract_nested_tag(line_xml, "ItemRef", "FullName") {
-                    let clean = Self::clean_qb_text(&item);
-                    if !clean.is_empty() && !vc_line_accounts.contains(&clean) {
-                        vc_line_accounts.push(clean);
-                    }
+                let item_account = if let Some(override_acct) = Self::extract_nested_tag(line_xml, "OverrideItemAccountRef", "FullName") {
+                    let clean = Self::clean_qb_text(&override_acct);
+                    if !clean.is_empty() { clean } else { "Cost of Goods Sold".to_string() }
+                } else {
+                    "Cost of Goods Sold".to_string()
+                };
+                if !vc_line_accounts.contains(&item_account) {
+                    vc_line_accounts.push(item_account);
                 }
             }
             let vc_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
-            let description = if !vc_line_accounts.is_empty() {
+            let raw_desc = if !vc_line_accounts.is_empty() {
                 vc_line_accounts.join(", ")
             } else if !vc_memo.is_empty() {
                 Self::clean_qb_text(&vc_memo)
             } else {
-                "Vendor Credit / Return".to_string()
+                "Cost of Goods Sold".to_string()
             };
+            let description = Self::normalize_purchase_description(&raw_desc);
 
             let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
                 .and_then(|s| s.parse::<f64>().ok())
@@ -1482,17 +1578,20 @@ impl QbXmlParser {
                 }
             }
 
-            // Extract Item names from Item Lines if no expense lines
+            // Extract Item lines if present (mapped to account or Cost of Goods Sold)
             let item_chunks: Vec<&str> = item_xml.split("<ItemLineRet>").skip(1).collect();
             for i_chunk in item_chunks {
                 let end_i = i_chunk.find("</ItemLineRet>").unwrap_or(i_chunk.len());
                 let line_xml = &i_chunk[..end_i];
 
-                if let Some(item) = Self::extract_nested_tag(line_xml, "ItemRef", "FullName") {
-                    let clean = Self::clean_qb_text(&item);
-                    if !clean.is_empty() && !line_accounts.contains(&clean) {
-                        line_accounts.push(clean);
-                    }
+                let item_account = if let Some(override_acct) = Self::extract_nested_tag(line_xml, "OverrideItemAccountRef", "FullName") {
+                    let clean = Self::clean_qb_text(&override_acct);
+                    if !clean.is_empty() { clean } else { "Cost of Goods Sold".to_string() }
+                } else {
+                    "Cost of Goods Sold".to_string()
+                };
+                if !line_accounts.contains(&item_account) {
+                    line_accounts.push(item_account);
                 }
             }
 

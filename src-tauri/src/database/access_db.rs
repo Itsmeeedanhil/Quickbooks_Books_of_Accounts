@@ -249,7 +249,10 @@ Remove-Item $jsonPath -Force -ErrorAction SilentlyContinue | Out-Null
     pub fn load_local_cache(&self) -> LocalDatabasePayload {
         if self.fallback_cache_path.exists() {
             if let Ok(content) = fs::read_to_string(&self.fallback_cache_path) {
-                if let Ok(data) = serde_json::from_str::<LocalDatabasePayload>(&content) {
+                if let Ok(mut data) = serde_json::from_str::<LocalDatabasePayload>(&content) {
+                    for entry in data.purchase_journal.iter_mut() {
+                        entry.description = crate::quickbooks::qbxml::QbXmlParser::normalize_purchase_description(&entry.description);
+                    }
                     return data;
                 }
             }
@@ -351,7 +354,11 @@ Remove-Item $jsonPath -Force -ErrorAction SilentlyContinue | Out-Null
     }
 
     pub fn get_purchase_journal(&self, _period: &str) -> Vec<PurchaseJournalEntry> {
-        self.load_local_cache().purchase_journal
+        let mut entries = self.load_local_cache().purchase_journal;
+        for entry in entries.iter_mut() {
+            entry.description = crate::quickbooks::qbxml::QbXmlParser::normalize_purchase_description(&entry.description);
+        }
+        entries
     }
 
     pub fn get_cash_receipts_journal(&self, _period: &str) -> Vec<CashReceiptsJournalEntry> {
