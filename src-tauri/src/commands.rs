@@ -354,20 +354,21 @@ pub fn sync_qb_to_access_db(
         Err(_) => state.db.get_cash_disbursements_journal(&period),
     };
 
-    // 6. General Journal & Ledger
+    // 6. General Journal
     let gj_query = QbXmlBuilder::build_general_journal_query(final_from.as_deref(), final_to.as_deref());
-    let (gj_entries, gl_entries) = match state.qb_bridge.process_qbxml_request(&gj_query) {
-        Ok(xml_resp) => (
-            QbXmlParser::parse_general_journal(&xml_resp, &period),
-            QbXmlParser::parse_general_ledger(&xml_resp, &period),
-        ),
-        Err(_) => (
-            state.db.get_general_journal(&period),
-            state.db.get_general_ledger(&period),
-        ),
+    let gj_entries = match state.qb_bridge.process_qbxml_request(&gj_query) {
+        Ok(xml_resp) => QbXmlParser::parse_general_journal(&xml_resp, &period),
+        Err(_) => state.db.get_general_journal(&period),
     };
 
-    let total_count = sales_entries.len() + purchase_entries.len() + receipts_entries.len() + disbursements_entries.len() + gj_entries.len();
+    // 7. General Ledger
+    let gl_query = QbXmlBuilder::build_general_ledger_query(final_from.as_deref(), final_to.as_deref());
+    let gl_entries = match state.qb_bridge.process_qbxml_request(&gl_query) {
+        Ok(xml_resp) => QbXmlParser::parse_general_ledger(&xml_resp, &period),
+        Err(_) => state.db.get_general_ledger(&period),
+    };
+
+    let total_count = sales_entries.len() + purchase_entries.len() + receipts_entries.len() + disbursements_entries.len() + gj_entries.len() + gl_entries.len();
 
     // Save into MS Access Database and local storage
     state.db.sync_all_from_qb(

@@ -530,6 +530,16 @@ impl QbXmlParser {
                 .or_else(|| Self::extract_tag_value(item_xml, "ResaleNumber"))
                 .unwrap_or_else(|| "003-841-103-000".to_string());
 
+            // Multi-Currency: Extract ExchangeRate (conversion to home currency PHP) and home amount if present
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_total: Option<f64> = Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
             // Scan all invoice lines to detect gross amount, line item discounts, and descriptions
             let mut gross_amount = 0.0;
             let mut total_discount = 0.0;
@@ -542,9 +552,10 @@ impl QbXmlParser {
 
                 let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
                 let desc = Self::extract_tag_value(line_xml, "Desc").unwrap_or_default();
-                let line_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
-                    .and_then(|s| s.parse().ok())
+                let raw_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
+                let line_amt = raw_amt * exchange_rate;
 
                 let is_discount = item_name.to_lowercase().contains("discount") || desc.to_lowercase().contains("discount");
 
@@ -563,25 +574,32 @@ impl QbXmlParser {
             for d_chunk in disc_chunks {
                 let end_d = d_chunk.find("</DiscountLineRet>").unwrap_or(d_chunk.len());
                 let d_xml = &d_chunk[..end_d];
-                let d_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
-                    .and_then(|s| s.parse().ok())
+                let raw_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
-                total_discount += d_amt.abs();
+                total_discount += raw_amt * exchange_rate;
             }
 
             let subtotal: f64 = Self::extract_tag_value(item_xml, "Subtotal")
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|v| v * exchange_rate)
                 .unwrap_or(0.0);
 
             let total_tax: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|v| v * exchange_rate)
                 .unwrap_or(0.0);
 
-            let total_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
-                .or_else(|| Self::extract_tag_value(item_xml, "AppliedAmount"))
-                .or_else(|| Self::extract_tag_value(item_xml, "BalanceRemaining"))
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+            let total_amount: f64 = if let Some(ht) = home_total {
+                ht
+            } else {
+                Self::extract_tag_value(item_xml, "TotalAmount")
+                    .or_else(|| Self::extract_tag_value(item_xml, "AppliedAmount"))
+                    .or_else(|| Self::extract_tag_value(item_xml, "BalanceRemaining"))
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| v * exchange_rate)
+                    .unwrap_or(0.0)
+            };
 
             let memo = Self::extract_tag_value(item_xml, "Memo")
                 .filter(|m| !m.trim().is_empty())
@@ -651,9 +669,23 @@ impl QbXmlParser {
             let customer_tin = customer_tins.get(&customer_name).cloned().unwrap_or_else(|| "003-841-103-000".to_string());
             let memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_else(|| "Sales Return / Credit Memo".to_string());
 
-            let total_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_total: Option<f64> = Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
+            let total_amount: f64 = if let Some(ht) = home_total {
+                ht
+            } else {
+                Self::extract_tag_value(item_xml, "TotalAmount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| v * exchange_rate)
+                    .unwrap_or(0.0)
+            };
 
             // Credit memo reduces sales (represented with negative or credit value)
             let vatable_base = -total_amount.abs();
@@ -715,6 +747,15 @@ impl QbXmlParser {
                 .cloned()
                 .unwrap_or_else(|| "000-000-000-000".to_string());
 
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_total: Option<f64> = Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
             let mut gross_amount = 0.0;
             let mut total_discount = 0.0;
             let mut first_item_desc = String::new();
@@ -726,9 +767,10 @@ impl QbXmlParser {
 
                 let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
                 let desc = Self::extract_tag_value(line_xml, "Desc").unwrap_or_default();
-                let line_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
-                    .and_then(|s| s.parse().ok())
+                let raw_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
+                let line_amt = raw_amt * exchange_rate;
 
                 let is_discount = item_name.to_lowercase().contains("discount") || desc.to_lowercase().contains("discount");
 
@@ -746,23 +788,30 @@ impl QbXmlParser {
             for d_chunk in disc_chunks {
                 let end_d = d_chunk.find("</DiscountLineRet>").unwrap_or(d_chunk.len());
                 let d_xml = &d_chunk[..end_d];
-                let d_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
-                    .and_then(|s| s.parse().ok())
+                let raw_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
-                total_discount += d_amt.abs();
+                total_discount += raw_amt * exchange_rate;
             }
 
             let subtotal: f64 = Self::extract_tag_value(item_xml, "Subtotal")
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|v| v * exchange_rate)
                 .unwrap_or(0.0);
 
             let total_tax: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|v| v * exchange_rate)
                 .unwrap_or(0.0);
 
-            let total_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+            let total_amount: f64 = if let Some(ht) = home_total {
+                ht
+            } else {
+                Self::extract_tag_value(item_xml, "TotalAmount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| v * exchange_rate)
+                    .unwrap_or(0.0)
+            };
 
             let memo = Self::extract_tag_value(item_xml, "Memo")
                 .filter(|m| !m.trim().is_empty())
@@ -847,6 +896,16 @@ impl QbXmlParser {
                 "National Highway, Calamba City, Laguna".to_string()
             };
 
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_amount_due: Option<f64> = Self::extract_tag_value(item_xml, "AmountDueInHomeCurrency")
+                .or_else(|| Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency"))
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
             let mut gross_amount = 0.0;
             let mut total_wtax = 0.0;
             let mut first_item_desc = String::new();
@@ -860,9 +919,10 @@ impl QbXmlParser {
 
                 let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
                 let desc = Self::extract_tag_value(line_xml, "Desc").unwrap_or_default();
-                let line_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
-                    .and_then(|s| s.parse().ok())
+                let raw_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
+                let line_amt = raw_amt * exchange_rate;
 
                 let item_lower = item_name.to_lowercase();
                 let desc_lower = desc.to_lowercase();
@@ -907,9 +967,10 @@ impl QbXmlParser {
 
                 let acct_name = Self::extract_nested_tag(exp_xml, "AccountRef", "FullName").unwrap_or_default();
                 let memo_exp = Self::extract_tag_value(exp_xml, "Memo").unwrap_or_default();
-                let exp_amt: f64 = Self::extract_tag_value(exp_xml, "Amount")
-                    .and_then(|s| s.parse().ok())
+                let raw_amt: f64 = Self::extract_tag_value(exp_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
+                let exp_amt = raw_amt * exchange_rate;
 
                 let acct_lower = acct_name.to_lowercase();
                 let memo_lower = memo_exp.to_lowercase();
@@ -953,25 +1014,30 @@ impl QbXmlParser {
             for d_chunk in disc_chunks {
                 let end_d = d_chunk.find("</DiscountLineRet>").unwrap_or(d_chunk.len());
                 let d_xml = &d_chunk[..end_d];
-                let d_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
-                    .and_then(|s| s.parse().ok())
+                let raw_amt: f64 = Self::extract_tag_value(d_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
-                total_wtax += d_amt.abs();
+                total_wtax += raw_amt * exchange_rate;
             }
 
             let suggested_disc: f64 = Self::extract_tag_value(item_xml, "SuggestedDiscountAmount")
                 .or_else(|| Self::extract_tag_value(item_xml, "DiscountAmount"))
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(0.0);
             if suggested_disc > 0.0 && total_wtax == 0.0 {
-                total_wtax += suggested_disc;
+                total_wtax += suggested_disc * exchange_rate;
             }
 
-            let amount_due: f64 = Self::extract_tag_value(item_xml, "AmountDue")
-                .or_else(|| Self::extract_tag_value(item_xml, "BalanceRemaining"))
-                .or_else(|| Self::extract_tag_value(item_xml, "OpenAmount"))
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+            let amount_due: f64 = if let Some(had) = home_amount_due {
+                had
+            } else {
+                Self::extract_tag_value(item_xml, "AmountDue")
+                    .or_else(|| Self::extract_tag_value(item_xml, "BalanceRemaining"))
+                    .or_else(|| Self::extract_tag_value(item_xml, "OpenAmount"))
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| v * exchange_rate)
+                    .unwrap_or(0.0)
+            };
 
             let bill_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
             let description = if !line_accounts.is_empty() {
@@ -1064,9 +1130,23 @@ impl QbXmlParser {
                 "Vendor Credit / Return".to_string()
             };
 
-            let total_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_total: Option<f64> = Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
+            let total_amount: f64 = if let Some(ht) = home_total {
+                ht
+            } else {
+                Self::extract_tag_value(item_xml, "TotalAmount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| v * exchange_rate)
+                    .unwrap_or(0.0)
+            };
 
             let vatable_base = -total_amount.abs();
             let net_purchases = vatable_base;
@@ -1114,9 +1194,24 @@ impl QbXmlParser {
             let customer_tin = customer_tins.get(&customer_name).cloned().unwrap_or_else(|| "003-841-103-000".to_string());
             let memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_else(|| "Customer Collection".to_string());
 
-            let gross_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
-                .and_then(|s| s.parse().ok())
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_total: Option<f64> = Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
+            let raw_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
+                .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(0.0);
+
+            let gross_amount = if let Some(ht) = home_total {
+                ht
+            } else {
+                ((raw_amount * exchange_rate) * 100.0).round() / 100.0
+            };
 
             // Standard Philippine 2307 Creditable Withholding Tax (usually 1% or 2%)
             let wtax_2307 = (gross_amount * 0.02 * 100.0).round() / 100.0;
@@ -1160,10 +1255,25 @@ impl QbXmlParser {
                 .or_else(|| Self::extract_tag_value(item_xml, "Memo"))
                 .unwrap_or_else(|| "Cash Sales Receipt".to_string());
 
-            let gross_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_total: Option<f64> = Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
+            let raw_amount: f64 = Self::extract_tag_value(item_xml, "TotalAmount")
                 .or_else(|| Self::extract_tag_value(item_xml, "Subtotal"))
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(0.0);
+
+            let gross_amount = if let Some(ht) = home_total {
+                ht
+            } else {
+                ((raw_amount * exchange_rate) * 100.0).round() / 100.0
+            };
 
             let net_collection = gross_amount;
 
@@ -1205,10 +1315,25 @@ impl QbXmlParser {
                 .or_else(|| Self::extract_nested_tag(item_xml, "DepositLineRet", "Memo"))
                 .unwrap_or_else(|| "Bank Deposit".to_string());
 
-            let gross_amount: f64 = Self::extract_tag_value(item_xml, "TotalDeposit")
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_total: Option<f64> = Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
+            let raw_amount: f64 = Self::extract_tag_value(item_xml, "TotalDeposit")
                 .or_else(|| Self::extract_nested_tag(item_xml, "DepositLineRet", "Amount"))
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(0.0);
+
+            let gross_amount = if let Some(ht) = home_total {
+                ht
+            } else {
+                ((raw_amount * exchange_rate) * 100.0).round() / 100.0
+            };
 
             let net_collection = gross_amount;
 
@@ -1252,9 +1377,24 @@ impl QbXmlParser {
                 .or_else(|| Self::extract_tag_value(item_xml, "Payee"))
                 .unwrap_or_else(|| "Payee Name".to_string());
 
-            let total_check_amt: f64 = Self::extract_tag_value(item_xml, "Amount")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_total: Option<f64> = Self::extract_tag_value(item_xml, "AmountInHomeCurrency")
+                .or_else(|| Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency"))
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
+            let total_check_amt: f64 = if let Some(ht) = home_total {
+                ht
+            } else {
+                Self::extract_tag_value(item_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| v * exchange_rate)
+                    .unwrap_or(0.0)
+            };
 
             // Extract Account names from Expense Lines
             let mut line_accounts: Vec<String> = Vec::new();
@@ -1332,9 +1472,24 @@ impl QbXmlParser {
                 .or_else(|| Self::extract_tag_value(item_xml, "Payee"))
                 .unwrap_or_else(|| "Vendor Payee".to_string());
 
-            let check_amt: f64 = Self::extract_tag_value(item_xml, "Amount")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let home_total: Option<f64> = Self::extract_tag_value(item_xml, "AmountInHomeCurrency")
+                .or_else(|| Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency"))
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&v| v > 0.0);
+
+            let check_amt: f64 = if let Some(ht) = home_total {
+                ht
+            } else {
+                Self::extract_tag_value(item_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| v * exchange_rate)
+                    .unwrap_or(0.0)
+            };
 
             let ap_account = Self::extract_nested_tag(item_xml, "APAccountRef", "FullName")
                 .map(|s| Self::clean_qb_text(&s))
@@ -1413,6 +1568,11 @@ impl QbXmlParser {
             let entry_no = Self::extract_tag_value(item_xml, "RefNumber").unwrap_or_else(|| "JV-001".to_string());
             let memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_else(|| "Journal Voucher".to_string());
 
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
             // Debit Line items
             let debit_lines: Vec<&str> = item_xml.split("<JournalDebitLine>").skip(1).collect();
             for d_line in debit_lines {
@@ -1439,7 +1599,14 @@ impl QbXmlParser {
                     }
                 }
 
-                let amount: f64 = Self::extract_tag_value(line_xml, "Amount").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                let amount: f64 = Self::extract_tag_value(line_xml, "AmountInHomeCurrency")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or_else(|| {
+                        Self::extract_tag_value(line_xml, "Amount")
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .map(|a| ((a * exchange_rate) * 100.0).round() / 100.0)
+                            .unwrap_or(0.0)
+                    });
 
                 entries.push(GeneralJournalEntry {
                     id: None,
@@ -1482,7 +1649,14 @@ impl QbXmlParser {
                     }
                 }
 
-                let amount: f64 = Self::extract_tag_value(line_xml, "Amount").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                let amount: f64 = Self::extract_tag_value(line_xml, "AmountInHomeCurrency")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or_else(|| {
+                        Self::extract_tag_value(line_xml, "Amount")
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .map(|a| ((a * exchange_rate) * 100.0).round() / 100.0)
+                            .unwrap_or(0.0)
+                    });
 
                 entries.push(GeneralJournalEntry {
                     id: None,
@@ -1767,7 +1941,7 @@ impl QbXmlParser {
 
                 let balance: f64 = Self::extract_tag_value(item_xml, "Balance")
                     .or_else(|| Self::extract_tag_value(item_xml, "TotalBalance"))
-                    .and_then(|s| s.parse().ok())
+                    .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
 
                 if !acc_name.is_empty() {
