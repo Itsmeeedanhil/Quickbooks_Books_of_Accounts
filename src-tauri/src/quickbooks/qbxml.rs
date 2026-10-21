@@ -312,11 +312,24 @@ impl QbXmlParser {
     pub fn clean_qb_text(s: &str) -> String {
         s.replace("&#183;", " - ")
          .replace("·", " - ")
-         .replace("&amp;", "&")
-         .replace("&quot;", "\"")
+         .replace("&amp;apos;", "'")
          .replace("&apos;", "'")
+         .replace("&#39;", "'")
+         .replace("&#x27;", "'")
+         .replace("&amp;quot;", "\"")
+         .replace("&quot;", "\"")
+         .replace("&#34;", "\"")
+         .replace("&#x22;", "\"")
+         .replace("&amp;amp;", "&")
+         .replace("&amp;", "&")
+         .replace("&#38;", "&")
+         .replace("&#x26;", "&")
          .replace("&lt;", "<")
+         .replace("&#60;", "<")
          .replace("&gt;", ">")
+         .replace("&#62;", ">")
+         .replace("&nbsp;", " ")
+         .replace("&#160;", " ")
          .trim()
          .to_string()
     }
@@ -332,7 +345,7 @@ impl QbXmlParser {
                 if let Some(tag_end) = after_prefix.find('>') {
                     let body = &after_prefix[tag_end + 1..];
                     if let Some(close_pos) = body.find(&close_tag) {
-                        return Some(body[..close_pos].trim().to_string());
+                        return Some(Self::clean_qb_text(&body[..close_pos]));
                     }
                 }
             }
@@ -1990,7 +2003,7 @@ impl QbXmlParser {
         if let Some(start) = xml.find(&pattern) {
             let rest = &xml[start + pattern.len()..];
             if let Some(end) = rest.find('"') {
-                return Some(rest[..end].trim().to_string());
+                return Some(Self::clean_qb_text(&rest[..end]));
             }
         }
         None

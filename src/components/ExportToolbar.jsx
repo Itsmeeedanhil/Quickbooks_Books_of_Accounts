@@ -43,13 +43,25 @@ export const ExportToolbar = ({
   const cleanText = (str) => {
     if (!str) return '';
     return String(str)
-      .replace(/&#183;/g, ' - ')
-      .replace(/·/g, ' - ')
-      .replace(/&amp;/g, '&')
-      .replace(/&quot;/g, '"')
+      .replace(/&amp;apos;/g, "'")
       .replace(/&apos;/g, "'")
+      .replace(/&#39;/g, "'")
+      .replace(/&#x27;/g, "'")
+      .replace(/&amp;quot;/g, '"')
+      .replace(/&quot;/g, '"')
+      .replace(/&#34;/g, '"')
+      .replace(/&#x22;/g, '"')
+      .replace(/&amp;amp;/g, '&')
+      .replace(/&amp;/g, '&')
+      .replace(/&#38;/g, '&')
+      .replace(/&#x26;/g, '&')
       .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>');
+      .replace(/&#60;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#62;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#183;/g, ' - ')
+      .replace(/·/g, ' - ');
   };
 
   // Export Excel (.xlsx) with custom BIR header, cell borders, formatting, and column alignments
