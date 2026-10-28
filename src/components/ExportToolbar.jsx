@@ -135,8 +135,6 @@ export const ExportToolbar = ({
           'Customer Name',
           'OR No.',
           'Description',
-          'Gross Amount',
-          'Net Collection',
           'Debit',
           'Credit',
         ];
@@ -146,8 +144,6 @@ export const ExportToolbar = ({
           { width: 38, align: 'left' },
           { width: 16, align: 'center' },
           { width: 45, align: 'left' },
-          { width: 20, align: 'right', isNum: true },
-          { width: 20, align: 'right', isNum: true },
           { width: 20, align: 'right', isNum: true },
           { width: 20, align: 'right', isNum: true },
         ];
@@ -450,41 +446,41 @@ export const ExportToolbar = ({
         });
         for (let c = 1; c <= numCols; c++) totRow.getCell(c).border = doubleBottomBorder;
       } else if (activeJournal === 'cash_receipts') {
-        let tGross = 0, tNet = 0, tDebit = 0, tCredit = 0;
-        data.forEach((item) => {
-          const gross = Number(item.gross_amount) || 0;
-          const net = Number(item.net_collection) || 0;
-          const debit = item.debit !== undefined ? Number(item.debit) : net;
-          const credit = item.credit !== undefined ? Number(item.credit) : net;
-          tGross += gross;
-          tNet += net;
+        let tDebit = 0, tCredit = 0;
+        data.forEach((item, index) => {
+          const debit = Number(item.debit) || 0;
+          const credit = Number(item.credit) || 0;
           tDebit += debit;
           tCredit += credit;
 
+          const isFirstLine =
+            index === 0 ||
+            item.or_no !== data[index - 1].or_no ||
+            item.txn_date !== data[index - 1].txn_date ||
+            (item.qb_txn_id && item.qb_txn_id !== data[index - 1].qb_txn_id);
+
           const row = ws.addRow([
-            item.txn_date,
-            item.customer_tin,
-            cleanText(item.customer_name),
-            item.or_no,
+            isFirstLine ? item.txn_date : '',
+            isFirstLine ? item.customer_tin : '',
+            isFirstLine ? cleanText(item.customer_name) : '',
+            isFirstLine ? item.or_no : '',
             cleanText(item.description),
-            gross,
-            net,
-            debit,
-            credit,
+            debit > 0 ? debit : null,
+            credit > 0 ? credit : null,
           ]);
           colDefs.forEach((col, idx) => {
             const cell = row.getCell(idx + 1);
             cell.alignment = { horizontal: col.align, vertical: 'middle' };
             cell.border = thinBorder;
-            if (col.isNum) cell.numFmt = '#,##0.00;(#,##0.00);"-"';
+            if (col.isNum && cell.value !== null) cell.numFmt = '#,##0.00;(#,##0.00);"-"';
           });
         });
 
-        const totRow = ws.addRow(['TOTAL :', '', '', '', '', tGross, tNet, tDebit, tCredit]);
+        const totRow = ws.addRow(['TOTAL :', '', '', '', '', tDebit, tCredit]);
         ws.mergeCells(totRow.number, 1, totRow.number, 5);
         totRow.getCell(1).font = { name: 'Calibri', size: 9, bold: true };
         totRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
-        [6, 7, 8, 9].forEach((cIdx) => {
+        [6, 7].forEach((cIdx) => {
           const c = totRow.getCell(cIdx);
           c.font = { name: 'Calibri', size: 9, bold: true };
           c.numFmt = '#,##0.00;(#,##0.00);"-"';
@@ -754,50 +750,48 @@ export const ExportToolbar = ({
             'Customer Name',
             'OR No.',
             'Description',
-            'Gross Amount',
-            'Net Collection',
             'Debit',
             'Credit',
           ],
         ];
 
-        tableBody = data.map((item) => [
-          item.txn_date,
-          item.customer_tin,
-          item.customer_name,
-          item.or_no,
-          item.description,
-          formatCurrency(item.gross_amount),
-          formatCurrency(item.net_collection),
-          formatCurrency(item.debit !== undefined ? item.debit : item.net_collection),
-          formatCurrency(item.credit !== undefined ? item.credit : item.net_collection),
-        ]);
+        tableBody = data.map((item, index) => {
+          const isFirstLine =
+            index === 0 ||
+            item.or_no !== data[index - 1].or_no ||
+            item.txn_date !== data[index - 1].txn_date ||
+            (item.qb_txn_id && item.qb_txn_id !== data[index - 1].qb_txn_id);
 
-        const tGross = data.reduce((s, i) => s + (Number(i.gross_amount) || 0), 0);
-        const tNet = data.reduce((s, i) => s + (Number(i.net_collection) || 0), 0);
-        const tDebit = data.reduce((s, i) => s + (i.debit !== undefined ? Number(i.debit) : (Number(i.net_collection) || 0)), 0);
-        const tCredit = data.reduce((s, i) => s + (i.credit !== undefined ? Number(i.credit) : (Number(i.net_collection) || 0)), 0);
+          return [
+            isFirstLine ? item.txn_date : '',
+            isFirstLine ? item.customer_tin : '',
+            isFirstLine ? cleanText(item.customer_name) : '',
+            isFirstLine ? item.or_no : '',
+            cleanText(item.description),
+            Number(item.debit) > 0 ? formatCurrency(item.debit) : '',
+            Number(item.credit) > 0 ? formatCurrency(item.credit) : '',
+          ];
+        });
+
+        const tDebit = data.reduce((s, i) => s + (Number(i.debit) || 0), 0);
+        const tCredit = data.reduce((s, i) => s + (Number(i.credit) || 0), 0);
 
         tableFoot = [
           [
             { content: 'TOTAL :', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } },
-            { content: formatCurrency(tGross), styles: { halign: 'right', fontStyle: 'bold' } },
-            { content: formatCurrency(tNet), styles: { halign: 'right', fontStyle: 'bold' } },
             { content: formatCurrency(tDebit), styles: { halign: 'right', fontStyle: 'bold' } },
             { content: formatCurrency(tCredit), styles: { halign: 'right', fontStyle: 'bold' } },
           ],
         ];
 
         columnStyles = {
-          0: { halign: 'center', cellWidth: 50 },
-          1: { halign: 'center', cellWidth: 75 },
-          2: { halign: 'left', cellWidth: 135 },
-          3: { halign: 'center', cellWidth: 55 },
-          4: { halign: 'left', cellWidth: 165 },
-          5: { halign: 'right', cellWidth: 80 },
-          6: { halign: 'right', cellWidth: 80 },
-          7: { halign: 'right', cellWidth: 80 },
-          8: { halign: 'right', cellWidth: 80 },
+          0: { halign: 'center', cellWidth: 55 },
+          1: { halign: 'center', cellWidth: 85 },
+          2: { halign: 'left', cellWidth: 170 },
+          3: { halign: 'center', cellWidth: 65 },
+          4: { halign: 'left', cellWidth: 235 },
+          5: { halign: 'right', cellWidth: 95 },
+          6: { halign: 'right', cellWidth: 96 },
         };
       } else if (activeJournal === 'cash_disbursements') {
         tableHead = [
@@ -1109,34 +1103,33 @@ export const ExportToolbar = ({
         'Customer Name',
         'OR No.',
         'Description',
-        'Gross Amount',
-        'Net Collection',
         'Debit',
         'Credit',
       ];
-      let tGross = 0, tNet = 0, tDebit = 0, tCredit = 0;
-      data.forEach((item) => {
-        const gross = Number(item.gross_amount) || 0;
-        const net = Number(item.net_collection) || 0;
-        const debit = item.debit !== undefined ? Number(item.debit) : net;
-        const credit = item.credit !== undefined ? Number(item.credit) : net;
-        tGross += gross;
-        tNet += net;
+      let tDebit = 0, tCredit = 0;
+      data.forEach((item, index) => {
+        const debit = Number(item.debit) || 0;
+        const credit = Number(item.credit) || 0;
         tDebit += debit;
         tCredit += credit;
+
+        const isFirstLine =
+          index === 0 ||
+          item.or_no !== data[index - 1].or_no ||
+          item.txn_date !== data[index - 1].txn_date ||
+          (item.qb_txn_id && item.qb_txn_id !== data[index - 1].qb_txn_id);
+
         rows.push([
-          item.txn_date || '',
-          item.customer_tin || '',
-          cleanText(item.customer_name || ''),
-          item.or_no || '',
+          isFirstLine ? (item.txn_date || '') : '',
+          isFirstLine ? (item.customer_tin || '') : '',
+          isFirstLine ? cleanText(item.customer_name || '') : '',
+          isFirstLine ? (item.or_no || '') : '',
           cleanText(item.description || ''),
-          gross.toFixed(2),
-          net.toFixed(2),
-          debit.toFixed(2),
-          credit.toFixed(2),
+          debit > 0 ? debit.toFixed(2) : '',
+          credit > 0 ? credit.toFixed(2) : '',
         ]);
       });
-      totals = ['TOTAL :', '', '', '', '', tGross.toFixed(2), tNet.toFixed(2), tDebit.toFixed(2), tCredit.toFixed(2)];
+      totals = ['TOTAL :', '', '', '', '', tDebit.toFixed(2), tCredit.toFixed(2)];
     } else if (activeJournal === 'cash_disbursements') {
       headers = [
         'Date',

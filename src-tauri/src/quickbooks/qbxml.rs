@@ -203,7 +203,10 @@ impl QbXmlBuilder {
     </DepositQueryRq>
     <CustomerQueryRq requestID="33">
       <OwnerID>0</OwnerID>
-    </CustomerQueryRq>"#,
+    </CustomerQueryRq>
+    <ItemQueryRq requestID="34">
+      <ActiveStatus>All</ActiveStatus>
+    </ItemQueryRq>"#,
             filter, filter, filter
         );
         Self::wrap_request(&inner)
@@ -472,6 +475,104 @@ impl QbXmlParser {
 
         // 4. Default fallback to the standard COGS account name ("Purchases")
         "Purchases".to_string()
+    }
+
+    pub fn parse_item_income_accounts(xml: &str) -> HashMap<String, String> {
+        let mut item_map = HashMap::new();
+        let item_tags = [
+            "ItemInventoryRet",
+            "ItemInventoryAssemblyRet",
+            "ItemNonInventoryRet",
+            "ItemServiceRet",
+            "ItemOtherChargeRet",
+            "ItemFixedAssetRet",
+            "ItemDiscountRet",
+        ];
+
+        for tag in item_tags {
+            let open_tag = format!("<{}>", tag);
+            let close_tag = format!("</{}>", tag);
+            let chunks: Vec<&str> = xml.split(&open_tag).skip(1).collect();
+
+            for chunk in chunks {
+                let end_idx = chunk.find(&close_tag).unwrap_or(chunk.len());
+                let item_xml = &chunk[..end_idx];
+
+                let income_acct = Self::extract_nested_tag(item_xml, "IncomeAccountRef", "FullName")
+                    .or_else(|| Self::extract_nested_tag(item_xml, "AccountRef", "FullName"))
+                    .or_else(|| Self::extract_nested_tag(item_xml, "SalesAndPurchase", "IncomeAccountRef"));
+
+                if let Some(acct) = income_acct {
+                    let clean_acct = Self::clean_qb_text(&acct);
+                    if !clean_acct.is_empty() {
+                        if let Some(list_id) = Self::extract_tag_value(item_xml, "ListID") {
+                            let clean_id = list_id.trim();
+                            if !clean_id.is_empty() {
+                                item_map.insert(format!("ID:{}", clean_id), clean_acct.clone());
+                            }
+                        }
+                        if let Some(full_name) = Self::extract_tag_value(item_xml, "FullName") {
+                            let clean_full = Self::clean_qb_text(&full_name);
+                            if !clean_full.is_empty() {
+                                item_map.insert(clean_full.to_lowercase(), clean_acct.clone());
+                            }
+                        }
+                        if let Some(name) = Self::extract_tag_value(item_xml, "Name") {
+                            let clean_name = Self::clean_qb_text(&name);
+                            if !clean_name.is_empty() {
+                                item_map.insert(clean_name.to_lowercase(), clean_acct.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item_map
+    }
+
+    pub fn resolve_item_income_account(
+        line_xml: &str,
+        item_name: &str,
+        item_income_map: &HashMap<String, String>,
+    ) -> String {
+        if let Some(override_acct) = Self::extract_nested_tag(line_xml, "OverrideItemAccountRef", "FullName")
+            .or_else(|| Self::extract_nested_tag(line_xml, "AccountRef", "FullName"))
+        {
+            let clean = Self::clean_qb_text(&override_acct);
+            if !clean.is_empty() {
+                return clean;
+            }
+        }
+
+        if let Some(list_id) = Self::extract_nested_tag(line_xml, "ItemRef", "ListID") {
+            let key = format!("ID:{}", list_id.trim());
+            if let Some(acct) = item_income_map.get(&key) {
+                if !acct.is_empty() {
+                    return acct.clone();
+                }
+            }
+        }
+
+        let clean_name = Self::clean_qb_text(item_name);
+        if !clean_name.is_empty() {
+            let lower = clean_name.to_lowercase();
+            if let Some(acct) = item_income_map.get(&lower) {
+                if !acct.is_empty() {
+                    return acct.clone();
+                }
+            }
+            if let Some(leaf) = lower.rsplit(':').next() {
+                let leaf_trimmed = leaf.trim();
+                if let Some(acct) = item_income_map.get(leaf_trimmed) {
+                    if !acct.is_empty() {
+                        return acct.clone();
+                    }
+                }
+            }
+        }
+
+        "Sales".to_string()
     }
 
     pub fn is_known_account_or_memo(part: &str) -> bool {
@@ -1442,8 +1543,10 @@ impl QbXmlParser {
     pub fn parse_cash_receipts_journal(xml: &str, period_ended: &str) -> Vec<CashReceiptsJournalEntry> {
         let mut entries = Vec::new();
         let customer_tins = Self::parse_customer_tins(xml);
+        let item_income_map = Self::parse_item_income_accounts(xml);
+        let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
-        // 1. Receive Payments
+        // 1. Receive Payments (<ReceivePaymentRet>)
         let pmt_chunks: Vec<&str> = xml.split("<ReceivePaymentRet>").skip(1).collect();
         for chunk in pmt_chunks {
             let end_idx = chunk.find("</ReceivePaymentRet>").unwrap_or(chunk.len());
@@ -1459,7 +1562,16 @@ impl QbXmlParser {
             let or_no = Self::extract_tag_value(item_xml, "RefNumber").unwrap_or_else(|| "OR-001".to_string());
             let customer_name = Self::extract_nested_tag(item_xml, "CustomerRef", "FullName").unwrap_or_else(|| "Customer Name".to_string());
             let customer_tin = customer_tins.get(&customer_name).cloned().unwrap_or_else(|| "003-841-103-000".to_string());
-            let memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_else(|| "Customer Collection".to_string());
+
+            let deposit_acct = Self::extract_nested_tag(item_xml, "DepositToAccountRef", "FullName")
+                .map(|s| Self::clean_qb_text(&s))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "Undeposited Funds".to_string());
+
+            let ar_acct = Self::extract_nested_tag(item_xml, "ARAccountRef", "FullName")
+                .map(|s| Self::clean_qb_text(&s))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "Accounts Receivable".to_string());
 
             let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
                 .and_then(|s| s.parse::<f64>().ok())
@@ -1480,10 +1592,72 @@ impl QbXmlParser {
                 ((raw_amount * exchange_rate) * 100.0).round() / 100.0
             };
 
-            // Standard Philippine 2307 Creditable Withholding Tax (usually 1% or 2%)
-            let wtax_2307 = (gross_amount * 0.02 * 100.0).round() / 100.0;
-            let net_collection = gross_amount - wtax_2307;
+            // Check if AppliedToTxnRet has any discount / withholding tax lines
+            let mut discount_total = 0.0;
+            let mut discount_acct = String::new();
+            let app_chunks: Vec<&str> = item_xml.split("<AppliedToTxnRet>").skip(1).collect();
+            for a_chunk in app_chunks {
+                let end_a = a_chunk.find("</AppliedToTxnRet>").unwrap_or(a_chunk.len());
+                let a_xml = &a_chunk[..end_a];
+                let d_amt: f64 = Self::extract_tag_value(a_xml, "DiscountAmount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                if d_amt > 0.0 {
+                    discount_total += ((d_amt * exchange_rate) * 100.0).round() / 100.0;
+                    if discount_acct.is_empty() {
+                        if let Some(da) = Self::extract_nested_tag(a_xml, "DiscountAccountRef", "FullName") {
+                            discount_acct = Self::clean_qb_text(&da);
+                        }
+                    }
+                }
+            }
 
+            let ar_credit_amount = ((gross_amount + discount_total) * 100.0).round() / 100.0;
+
+            // Debit Line: Cash / Bank / Undeposited Funds Account
+            entries.push(CashReceiptsJournalEntry {
+                id: None,
+                period_ended: period_ended.to_string(),
+                txn_date: txn_date.clone(),
+                customer_tin: customer_tin.clone(),
+                customer_name: customer_name.clone(),
+                or_no: or_no.clone(),
+                description: deposit_acct,
+                gross_amount,
+                withholding_tax_2307: discount_total,
+                net_collection: gross_amount,
+                debit: gross_amount,
+                credit: 0.0,
+                qb_txn_id: txn_id.clone(),
+                synced_at: Some(now_str.clone()),
+            });
+
+            // Optional Debit Line for Discount / Creditable Withholding Tax
+            if discount_total > 0.0 {
+                let disc_acct_name = if !discount_acct.is_empty() {
+                    discount_acct
+                } else {
+                    "Sales Discount / Withholding Tax".to_string()
+                };
+                entries.push(CashReceiptsJournalEntry {
+                    id: None,
+                    period_ended: period_ended.to_string(),
+                    txn_date: txn_date.clone(),
+                    customer_tin: customer_tin.clone(),
+                    customer_name: customer_name.clone(),
+                    or_no: or_no.clone(),
+                    description: disc_acct_name,
+                    gross_amount: 0.0,
+                    withholding_tax_2307: 0.0,
+                    net_collection: 0.0,
+                    debit: discount_total,
+                    credit: 0.0,
+                    qb_txn_id: txn_id.clone(),
+                    synced_at: Some(now_str.clone()),
+                });
+            }
+
+            // Credit Line: Accounts Receivable Account
             entries.push(CashReceiptsJournalEntry {
                 id: None,
                 period_ended: period_ended.to_string(),
@@ -1491,16 +1665,18 @@ impl QbXmlParser {
                 customer_tin,
                 customer_name,
                 or_no,
-                description: memo,
-                gross_amount,
-                withholding_tax_2307: wtax_2307,
-                net_collection,
+                description: ar_acct,
+                gross_amount: 0.0,
+                withholding_tax_2307: 0.0,
+                net_collection: 0.0,
+                debit: 0.0,
+                credit: ar_credit_amount,
                 qb_txn_id: txn_id,
-                synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+                synced_at: Some(now_str.clone()),
             });
         }
 
-        // 2. Sales Receipts (Cash Sales as Cash Receipts)
+        // 2. Sales Receipts (<SalesReceiptRet>)
         let sr_chunks: Vec<&str> = xml.split("<SalesReceiptRet>").skip(1).collect();
         for chunk in sr_chunks {
             let end_idx = chunk.find("</SalesReceiptRet>").unwrap_or(chunk.len());
@@ -1518,9 +1694,11 @@ impl QbXmlParser {
                 .unwrap_or_else(|| "SR-001".to_string());
             let customer_name = Self::extract_nested_tag(item_xml, "CustomerRef", "FullName").unwrap_or_else(|| "Anonymous".to_string());
             let customer_tin = customer_tins.get(&customer_name).cloned().unwrap_or_else(|| "000-000-000-000".to_string());
-            let memo = Self::extract_nested_tag(item_xml, "SalesReceiptLineRet", "Desc")
-                .or_else(|| Self::extract_tag_value(item_xml, "Memo"))
-                .unwrap_or_else(|| "Cash Sales Receipt".to_string());
+
+            let deposit_acct = Self::extract_nested_tag(item_xml, "DepositToAccountRef", "FullName")
+                .map(|s| Self::clean_qb_text(&s))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "Undeposited Funds".to_string());
 
             let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
                 .and_then(|s| s.parse::<f64>().ok())
@@ -1542,25 +1720,120 @@ impl QbXmlParser {
                 ((raw_amount * exchange_rate) * 100.0).round() / 100.0
             };
 
-            let net_collection = gross_amount;
-
+            // Debit Line: DepositToAccountRef (Cash / Bank / Undeposited Funds)
             entries.push(CashReceiptsJournalEntry {
                 id: None,
                 period_ended: period_ended.to_string(),
-                txn_date,
-                customer_tin,
-                customer_name,
-                or_no,
-                description: memo,
+                txn_date: txn_date.clone(),
+                customer_tin: customer_tin.clone(),
+                customer_name: customer_name.clone(),
+                or_no: or_no.clone(),
+                description: deposit_acct,
                 gross_amount,
                 withholding_tax_2307: 0.0,
-                net_collection,
-                qb_txn_id: txn_id,
-                synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+                net_collection: gross_amount,
+                debit: gross_amount,
+                credit: 0.0,
+                qb_txn_id: txn_id.clone(),
+                synced_at: Some(now_str.clone()),
             });
+
+            // Collect Credit lines by Income Account from SalesReceiptLineRet
+            let mut credit_accounts: Vec<(String, f64)> = Vec::new();
+            let line_chunks: Vec<&str> = item_xml.split("<SalesReceiptLineRet>").skip(1).collect();
+            for l_chunk in line_chunks {
+                let end_l = l_chunk.find("</SalesReceiptLineRet>").unwrap_or(l_chunk.len());
+                let line_xml = &l_chunk[..end_l];
+                let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
+                let line_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| ((v * exchange_rate) * 100.0).round() / 100.0)
+                    .unwrap_or(0.0);
+
+                if line_amt != 0.0 {
+                    let acct = Self::resolve_item_income_account(line_xml, &item_name, &item_income_map);
+                    if let Some(existing) = credit_accounts.iter_mut().find(|(a, _)| a == &acct) {
+                        existing.1 = ((existing.1 + line_amt) * 100.0).round() / 100.0;
+                    } else {
+                        credit_accounts.push((acct, line_amt));
+                    }
+                }
+            }
+
+            let tax_amt: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|v| ((v * exchange_rate) * 100.0).round() / 100.0)
+                .unwrap_or(0.0);
+
+            if tax_amt > 0.0 {
+                credit_accounts.push(("Output Tax".to_string(), tax_amt));
+            }
+
+            let sum_credits: f64 = credit_accounts.iter().map(|(_, amt)| *amt).sum();
+            if credit_accounts.is_empty() {
+                entries.push(CashReceiptsJournalEntry {
+                    id: None,
+                    period_ended: period_ended.to_string(),
+                    txn_date,
+                    customer_tin,
+                    customer_name,
+                    or_no,
+                    description: "Sales".to_string(),
+                    gross_amount: 0.0,
+                    withholding_tax_2307: 0.0,
+                    net_collection: 0.0,
+                    debit: 0.0,
+                    credit: gross_amount,
+                    qb_txn_id: txn_id,
+                    synced_at: Some(now_str.clone()),
+                });
+            } else {
+                // Adjust first credit account if needed so total credits equal gross_amount (e.g. VAT inclusive or rounding)
+                let diff = ((gross_amount - sum_credits) * 100.0).round() / 100.0;
+                if diff.abs() > 0.009 {
+                    credit_accounts[0].1 = ((credit_accounts[0].1 + diff) * 100.0).round() / 100.0;
+                }
+                for (acct_name, amt) in credit_accounts {
+                    if amt > 0.0 {
+                        entries.push(CashReceiptsJournalEntry {
+                            id: None,
+                            period_ended: period_ended.to_string(),
+                            txn_date: txn_date.clone(),
+                            customer_tin: customer_tin.clone(),
+                            customer_name: customer_name.clone(),
+                            or_no: or_no.clone(),
+                            description: acct_name,
+                            gross_amount: 0.0,
+                            withholding_tax_2307: 0.0,
+                            net_collection: 0.0,
+                            debit: 0.0,
+                            credit: amt,
+                            qb_txn_id: txn_id.clone(),
+                            synced_at: Some(now_str.clone()),
+                        });
+                    } else if amt < 0.0 {
+                        entries.push(CashReceiptsJournalEntry {
+                            id: None,
+                            period_ended: period_ended.to_string(),
+                            txn_date: txn_date.clone(),
+                            customer_tin: customer_tin.clone(),
+                            customer_name: customer_name.clone(),
+                            or_no: or_no.clone(),
+                            description: acct_name,
+                            gross_amount: 0.0,
+                            withholding_tax_2307: 0.0,
+                            net_collection: 0.0,
+                            debit: amt.abs(),
+                            credit: 0.0,
+                            qb_txn_id: txn_id.clone(),
+                            synced_at: Some(now_str.clone()),
+                        });
+                    }
+                }
+            }
         }
 
-        // 3. Deposits
+        // 3. Deposits (<DepositRet>)
         let dep_chunks: Vec<&str> = xml.split("<DepositRet>").skip(1).collect();
         for chunk in dep_chunks {
             let end_idx = chunk.find("</DepositRet>").unwrap_or(chunk.len());
@@ -1578,9 +1851,11 @@ impl QbXmlParser {
                 .or_else(|| Self::extract_nested_tag(item_xml, "DepositToAccountRef", "FullName"))
                 .unwrap_or_else(|| "Bank Deposit".to_string());
             let customer_tin = customer_tins.get(&customer_name).cloned().unwrap_or_else(|| "000-000-000-000".to_string());
-            let memo = Self::extract_tag_value(item_xml, "Memo")
-                .or_else(|| Self::extract_nested_tag(item_xml, "DepositLineRet", "Memo"))
-                .unwrap_or_else(|| "Bank Deposit".to_string());
+
+            let deposit_acct = Self::extract_nested_tag(item_xml, "DepositToAccountRef", "FullName")
+                .map(|s| Self::clean_qb_text(&s))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "Cash in Bank".to_string());
 
             let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
                 .and_then(|s| s.parse::<f64>().ok())
@@ -1602,22 +1877,81 @@ impl QbXmlParser {
                 ((raw_amount * exchange_rate) * 100.0).round() / 100.0
             };
 
-            let net_collection = gross_amount;
-
+            // Debit Line: DepositToAccountRef (Bank Account)
             entries.push(CashReceiptsJournalEntry {
                 id: None,
                 period_ended: period_ended.to_string(),
-                txn_date,
-                customer_tin,
-                customer_name,
-                or_no,
-                description: memo,
+                txn_date: txn_date.clone(),
+                customer_tin: customer_tin.clone(),
+                customer_name: customer_name.clone(),
+                or_no: or_no.clone(),
+                description: deposit_acct,
                 gross_amount,
                 withholding_tax_2307: 0.0,
-                net_collection,
-                qb_txn_id: txn_id,
-                synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+                net_collection: gross_amount,
+                debit: gross_amount,
+                credit: 0.0,
+                qb_txn_id: txn_id.clone(),
+                synced_at: Some(now_str.clone()),
             });
+
+            // Credit Line(s): DepositLineRet AccountRef / FromAccountRef
+            let mut dep_credit_lines: Vec<(String, f64)> = Vec::new();
+            let dline_chunks: Vec<&str> = item_xml.split("<DepositLineRet>").skip(1).collect();
+            for dl in dline_chunks {
+                let end_dl = dl.find("</DepositLineRet>").unwrap_or(dl.len());
+                let dl_xml = &dl[..end_dl];
+                let from_acct = Self::extract_nested_tag(dl_xml, "AccountRef", "FullName")
+                    .or_else(|| Self::extract_nested_tag(dl_xml, "FromAccountRef", "FullName"))
+                    .map(|s| Self::clean_qb_text(&s))
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "Undeposited Funds".to_string());
+                let dl_amt: f64 = Self::extract_tag_value(dl_xml, "Amount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| ((v * exchange_rate) * 100.0).round() / 100.0)
+                    .unwrap_or(0.0);
+                if dl_amt > 0.0 {
+                    dep_credit_lines.push((from_acct, dl_amt));
+                }
+            }
+
+            if dep_credit_lines.is_empty() {
+                entries.push(CashReceiptsJournalEntry {
+                    id: None,
+                    period_ended: period_ended.to_string(),
+                    txn_date,
+                    customer_tin,
+                    customer_name,
+                    or_no,
+                    description: "Undeposited Funds".to_string(),
+                    gross_amount: 0.0,
+                    withholding_tax_2307: 0.0,
+                    net_collection: 0.0,
+                    debit: 0.0,
+                    credit: gross_amount,
+                    qb_txn_id: txn_id,
+                    synced_at: Some(now_str.clone()),
+                });
+            } else {
+                for (acct_name, amt) in dep_credit_lines {
+                    entries.push(CashReceiptsJournalEntry {
+                        id: None,
+                        period_ended: period_ended.to_string(),
+                        txn_date: txn_date.clone(),
+                        customer_tin: customer_tin.clone(),
+                        customer_name: customer_name.clone(),
+                        or_no: or_no.clone(),
+                        description: acct_name,
+                        gross_amount: 0.0,
+                        withholding_tax_2307: 0.0,
+                        net_collection: 0.0,
+                        debit: 0.0,
+                        credit: amt,
+                        qb_txn_id: txn_id.clone(),
+                        synced_at: Some(now_str.clone()),
+                    });
+                }
+            }
         }
 
         entries
@@ -2381,7 +2715,25 @@ impl QbXmlParser {
                 customer_tin: "003-841-103-000".to_string(),
                 customer_name: "Team Sual Corporation".to_string(),
                 or_no: "OR-88201".to_string(),
-                description: "Payment for Inv 201400431-3".to_string(),
+                description: "Undeposited Funds".to_string(),
+                debit: 647274.37,
+                credit: 0.0,
+                gross_amount: 659043.00,
+                withholding_tax_2307: 11768.63,
+                net_collection: 647274.37,
+                qb_txn_id: Some("QB-PMT-3001".to_string()),
+                synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+            },
+            CashReceiptsJournalEntry {
+                id: Some(2),
+                period_ended: period.to_string(),
+                txn_date: "02/25/2023".to_string(),
+                customer_tin: "003-841-103-000".to_string(),
+                customer_name: "Team Sual Corporation".to_string(),
+                or_no: "OR-88201".to_string(),
+                description: "Accounts Receivable".to_string(),
+                debit: 0.0,
+                credit: 647274.37,
                 gross_amount: 659043.00,
                 withholding_tax_2307: 11768.63,
                 net_collection: 647274.37,

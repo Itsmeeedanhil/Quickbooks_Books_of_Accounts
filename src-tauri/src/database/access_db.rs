@@ -119,8 +119,10 @@ try {{
             let _ = cmd.output();
         }
 
-        let _ = self.save_local_cache(&default_data);
-        let _ = self.sync_records_to_accdb(&default_data);
+        if !self.fallback_cache_path.exists() {
+            let _ = self.save_local_cache(&default_data);
+            let _ = self.sync_records_to_accdb(&default_data);
+        }
 
         Ok(())
     }
@@ -378,7 +380,41 @@ Remove-Item $jsonPath -Force -ErrorAction SilentlyContinue | Out-Null
     }
 
     pub fn get_cash_receipts_journal(&self, _period: &str) -> Vec<CashReceiptsJournalEntry> {
-        self.load_local_cache().cash_receipts_journal
+        let raw_entries = self.load_local_cache().cash_receipts_journal;
+        let mut expanded = Vec::new();
+
+        for entry in raw_entries {
+            if entry.debit == 0.0 && entry.credit == 0.0 {
+                let amt = if entry.gross_amount > 0.0 {
+                    entry.gross_amount
+                } else {
+                    entry.net_collection
+                };
+                let credit_acct = if entry.description.eq_ignore_ascii_case("Customer Collection") {
+                    "Accounts Receivable".to_string()
+                } else if entry.description.eq_ignore_ascii_case("Bank Deposit") {
+                    "Undeposited Funds".to_string()
+                } else {
+                    "Sales".to_string()
+                };
+
+                let mut debit_row = entry.clone();
+                debit_row.description = "Undeposited Funds".to_string();
+                debit_row.debit = amt;
+                debit_row.credit = 0.0;
+                expanded.push(debit_row);
+
+                let mut credit_row = entry;
+                credit_row.description = credit_acct;
+                credit_row.debit = 0.0;
+                credit_row.credit = amt;
+                expanded.push(credit_row);
+            } else {
+                expanded.push(entry);
+            }
+        }
+
+        expanded
     }
 
     pub fn get_cash_disbursements_journal(&self, _period: &str) -> Vec<CashDisbursementsJournalEntry> {

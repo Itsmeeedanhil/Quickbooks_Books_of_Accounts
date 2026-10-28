@@ -71,6 +71,10 @@ pub struct CashReceiptsJournalEntry {
     pub gross_amount: f64,
     pub withholding_tax_2307: f64,
     pub net_collection: f64,
+    #[serde(default)]
+    pub debit: f64,
+    #[serde(default)]
+    pub credit: f64,
     pub qb_txn_id: Option<String>,
     pub synced_at: Option<String>,
 }
