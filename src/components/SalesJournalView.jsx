@@ -23,13 +23,20 @@ export const SalesJournalView = ({
   });
 
   const totals = filteredEntries.reduce(
-    (acc, e) => ({
-      amount: acc.amount + (Number(e.amount) || 0),
-      discount: acc.discount + (Number(e.discount) || 0),
-      vat: acc.vat + (Number(e.vat_amount) || 0),
-      net: acc.net + (Number(e.net_sales) || 0),
-    }),
-    { amount: 0, discount: 0, vat: 0, net: 0 }
+    (acc, e) => {
+      const net = Number(e.net_sales) || 0;
+      const debit = e.debit !== undefined ? Number(e.debit) || 0 : net;
+      const credit = e.credit !== undefined ? Number(e.credit) || 0 : net;
+      return {
+        amount: acc.amount + (Number(e.amount) || 0),
+        discount: acc.discount + (Number(e.discount) || 0),
+        vat: acc.vat + (Number(e.vat_amount) || 0),
+        net: acc.net + net,
+        debit: acc.debit + debit,
+        credit: acc.credit + credit,
+      };
+    },
+    { amount: 0, discount: 0, vat: 0, net: 0, debit: 0, credit: 0 }
   );
 
   const formatCurrency = (num) => {
@@ -101,13 +108,15 @@ export const SalesJournalView = ({
                   </span>
                 </th>
                 <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Net Sales</th>
+                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Debit</th>
+                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Credit</th>
                 <th className="py-2 px-1 text-center w-14 no-print">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-300">
               {filteredEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-slate-400">
+                  <td colSpan={13} className="py-12 text-center text-slate-400">
                     <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                     <p className="font-medium text-slate-600">No Sales Invoices found for this period.</p>
                     <p className="text-[11px] text-slate-400 mt-1">
@@ -151,6 +160,12 @@ export const SalesJournalView = ({
                     <td className="py-1 px-2.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
                       {formatCurrency(entry.net_sales)}
                     </td>
+                    <td className="py-1 px-2.5 text-right font-mono font-medium text-slate-800 whitespace-nowrap">
+                      {formatCurrency(entry.debit !== undefined ? entry.debit : entry.net_sales)}
+                    </td>
+                    <td className="py-1 px-2.5 text-right font-mono font-medium text-slate-800 whitespace-nowrap">
+                      {formatCurrency(entry.credit !== undefined ? entry.credit : entry.net_sales)}
+                    </td>
                     <td className="py-1 px-1 text-center no-print whitespace-nowrap">
                       <div className="flex items-center justify-center gap-1">
                         <button
@@ -190,6 +205,12 @@ export const SalesJournalView = ({
                   </td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">
                     {formatCurrency(totals.net)}
+                  </td>
+                  <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">
+                    {formatCurrency(totals.debit)}
+                  </td>
+                  <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">
+                    {formatCurrency(totals.credit)}
                   </td>
                   <td className="no-print"></td>
                 </tr>
