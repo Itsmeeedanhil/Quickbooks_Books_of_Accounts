@@ -171,7 +171,8 @@ impl QbXmlBuilder {
     </VendorQueryRq>
     <ItemQueryRq requestID="23">
       <ActiveStatus>All</ActiveStatus>
-    </ItemQueryRq>"#,
+    </ItemQueryRq>
+    <AccountQueryRq requestID="24" />"#,
             filter, filter
         );
         Self::wrap_request(&inner)
@@ -1237,10 +1238,40 @@ impl QbXmlParser {
         let vendor_tins = Self::parse_vendor_tins(xml);
         let item_cogs_map = Self::parse_item_cogs_accounts(xml);
 
+        // Build Account lookup map (ListID / FullName -> AccountNumber + FullName) from AccountRet
+        let mut account_info_map: HashMap<String, String> = HashMap::new();
+        let acc_chunks: Vec<&str> = xml.split("<AccountRet>").skip(1).collect();
+        for ac in acc_chunks {
+            let end_ac = ac.find("</AccountRet>").unwrap_or(ac.len());
+            let ac_xml = &ac[..end_ac];
+            let acc_num = Self::extract_tag_value(ac_xml, "AccountNumber").unwrap_or_default();
+            let full_name = Self::extract_tag_value(ac_xml, "FullName")
+                .or_else(|| Self::extract_tag_value(ac_xml, "Name"))
+                .unwrap_or_default();
+            let list_id = Self::extract_tag_value(ac_xml, "ListID").unwrap_or_default();
+            let combined = format!("{} {}", acc_num, full_name).to_lowercase();
+            if !list_id.is_empty() {
+                account_info_map.insert(list_id, combined.clone());
+            }
+            if !full_name.is_empty() {
+                account_info_map.insert(Self::clean_qb_text(&full_name).to_lowercase(), combined.clone());
+                account_info_map.insert(full_name.to_lowercase(), combined);
+            }
+        }
+
         let bill_chunks: Vec<&str> = xml.split("<BillRet>").skip(1).collect();
         for chunk in bill_chunks {
             let end_idx = chunk.find("</BillRet>").unwrap_or(chunk.len());
             let item_xml = &chunk[..end_idx];
+
+            let header_end = item_xml
+                .find("<ExpenseLineRet>")
+                .into_iter()
+                .chain(item_xml.find("<ItemLineRet>"))
+                .chain(item_xml.find("<ItemGroupLineRet>"))
+                .min()
+                .unwrap_or(item_xml.len());
+            let header_xml = &item_xml[..header_end];
 
             let txn_id = Self::extract_tag_value(item_xml, "TxnID");
             let raw_date = Self::extract_tag_value(item_xml, "TxnDate").unwrap_or_else(|| "2023-02-05".to_string());
@@ -1278,8 +1309,8 @@ impl QbXmlParser {
             let mut gross_amount = 0.0;
             let mut total_wtax = 0.0;
             let mut explicit_input_tax = 0.0;
-            let mut first_item_desc = String::new();
-            let mut line_accounts: Vec<String> = Vec::new();
+            let mut exp_memos: Vec<String> = Vec::new();
+            let mut item_descs: Vec<String> = Vec::new();
 
             // 1. Scan Item lines
             let item_chunks: Vec<&str> = item_xml.split("<ItemLineRet>").skip(1).collect();
@@ -1289,16 +1320,20 @@ impl QbXmlParser {
 
                 let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
                 let desc = Self::extract_tag_value(line_xml, "Desc").unwrap_or_default();
-                let raw_amt: f64 = Self::extract_tag_value(line_xml, "Amount")
+                let line_amt: f64 = Self::extract_tag_value(line_xml, "AmountInHomeCurrency")
                     .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(0.0);
-                let line_amt = raw_amt * exchange_rate;
+                    .unwrap_or_else(|| {
+                        Self::extract_tag_value(line_xml, "Amount")
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .map(|v| v * exchange_rate)
+                            .unwrap_or(0.0)
+                    });
 
                 let item_lower = item_name.to_lowercase();
                 let desc_lower = desc.to_lowercase();
                 let mapped_acct_lower = item_cogs_map
-                    .get(&Self::clean_qb_text(&item_name))
-                    .or_else(|| item_cogs_map.get(&item_name))
+                    .get(&Self::clean_qb_text(&item_name).to_lowercase())
+                    .or_else(|| item_cogs_map.get(&item_name.to_lowercase()))
                     .map(|s| s.to_lowercase())
                     .unwrap_or_default();
 
@@ -1341,39 +1376,53 @@ impl QbXmlParser {
                     total_wtax += line_amt.abs();
                 } else if line_amt > 0.0 {
                     gross_amount += line_amt;
-                    let item_account = Self::resolve_item_cogs_account(line_xml, &item_name, &item_cogs_map);
-                    if !line_accounts.contains(&item_account) {
-                        line_accounts.push(item_account);
-                    }
-                    if first_item_desc.is_empty() && !desc.is_empty() {
-                        first_item_desc = desc;
+                    let clean_desc = Self::clean_qb_text(&desc);
+                    if !clean_desc.is_empty() && !item_descs.contains(&clean_desc) {
+                        item_descs.push(clean_desc);
                     }
                 }
             }
 
-            // 2. Scan Expense lines
+            // 2. Scan Expense lines (Expenses tab in QuickBooks)
             let exp_chunks: Vec<&str> = item_xml.split("<ExpenseLineRet>").skip(1).collect();
             for e_chunk in exp_chunks {
                 let end_e = e_chunk.find("</ExpenseLineRet>").unwrap_or(e_chunk.len());
                 let exp_xml = &e_chunk[..end_e];
 
                 let acct_name = Self::extract_nested_tag(exp_xml, "AccountRef", "FullName").unwrap_or_default();
+                let acct_list_id = Self::extract_nested_tag(exp_xml, "AccountRef", "ListID").unwrap_or_default();
                 let memo_exp = Self::extract_tag_value(exp_xml, "Memo").unwrap_or_default();
-                let raw_amt: f64 = Self::extract_tag_value(exp_xml, "Amount")
+                let exp_amt: f64 = Self::extract_tag_value(exp_xml, "AmountInHomeCurrency")
                     .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(0.0);
-                let exp_amt = raw_amt * exchange_rate;
+                    .unwrap_or_else(|| {
+                        Self::extract_tag_value(exp_xml, "Amount")
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .map(|v| v * exchange_rate)
+                            .unwrap_or(0.0)
+                    });
 
-                let acct_lower = acct_name.to_lowercase();
+                let acct_lower = Self::clean_qb_text(&acct_name).to_lowercase();
+                let acct_mapped = account_info_map
+                    .get(&acct_list_id)
+                    .or_else(|| account_info_map.get(&acct_lower))
+                    .cloned()
+                    .unwrap_or_default();
                 let memo_lower = memo_exp.to_lowercase();
 
                 let is_tax = acct_lower.contains("input tax")
                     || acct_lower.contains("input vat")
                     || acct_lower.contains("evat")
                     || acct_lower.contains("16410")
+                    || acct_mapped.contains("input tax")
+                    || acct_mapped.contains("input vat")
+                    || acct_mapped.contains("16410")
                     || acct_lower.contains("vat - input")
                     || acct_lower.contains("vat input")
                     || acct_lower.contains("deferred input")
+                    || acct_lower == "vat"
+                    || acct_lower.starts_with("vat ")
+                    || acct_lower.ends_with(" vat")
+                    || acct_lower.contains(":vat")
                     || memo_lower.contains("input tax")
                     || memo_lower.contains("input vat");
 
@@ -1384,6 +1433,9 @@ impl QbXmlParser {
                     || acct_lower.contains("cwt") 
                     || acct_lower.contains("ewt") 
                     || acct_lower.contains("16420") 
+                    || acct_lower.contains("29200")
+                    || acct_mapped.contains("29200")
+                    || acct_mapped.contains("withholding")
                     || acct_lower.contains("creditable")
                     || acct_lower.contains("discount") 
                     || memo_lower.contains("withholding") 
@@ -1399,19 +1451,17 @@ impl QbXmlParser {
                     explicit_input_tax += exp_tax_amt;
                 }
 
+                let clean_exp_memo = Self::clean_qb_text(&memo_exp);
+                if !clean_exp_memo.is_empty() && !exp_memos.contains(&clean_exp_memo) {
+                    exp_memos.push(clean_exp_memo);
+                }
+
                 if is_tax {
                     explicit_input_tax += exp_amt.abs();
                 } else if exp_amt < 0.0 || is_wtax {
                     total_wtax += exp_amt.abs();
                 } else if exp_amt > 0.0 {
                     gross_amount += exp_amt;
-                    let clean = Self::clean_qb_text(&acct_name);
-                    if !clean.is_empty() && !line_accounts.contains(&clean) {
-                        line_accounts.push(clean);
-                    }
-                    if first_item_desc.is_empty() && !memo_exp.is_empty() {
-                        first_item_desc = memo_exp;
-                    }
                 }
             }
 
@@ -1460,15 +1510,16 @@ impl QbXmlParser {
                     .unwrap_or(0.0)
             };
 
-            let bill_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
-            let description = if !line_accounts.is_empty() {
-                line_accounts.join(", ")
-            } else if !bill_memo.trim().is_empty() {
+            // Description column uses the Memo from QuickBooks
+            let bill_memo = Self::extract_tag_value(header_xml, "Memo").unwrap_or_default();
+            let description = if !bill_memo.trim().is_empty() {
                 Self::clean_qb_text(&bill_memo)
-            } else if !first_item_desc.is_empty() {
-                Self::clean_qb_text(&first_item_desc)
+            } else if !exp_memos.is_empty() {
+                exp_memos.join("; ")
+            } else if !item_descs.is_empty() {
+                item_descs.join(", ")
             } else {
-                "Purchases".to_string()
+                "".to_string()
             };
 
             let discount = ((total_wtax) * 100.0).round() / 100.0;
@@ -1507,6 +1558,15 @@ impl QbXmlParser {
             let end_idx = chunk.find("</VendorCreditRet>").unwrap_or(chunk.len());
             let item_xml = &chunk[..end_idx];
 
+            let header_end = item_xml
+                .find("<ExpenseLineRet>")
+                .into_iter()
+                .chain(item_xml.find("<ItemLineRet>"))
+                .chain(item_xml.find("<ItemGroupLineRet>"))
+                .min()
+                .unwrap_or(item_xml.len());
+            let header_xml = &item_xml[..header_end];
+
             let txn_id = Self::extract_tag_value(item_xml, "TxnID");
             let raw_date = Self::extract_tag_value(item_xml, "TxnDate").unwrap_or_else(|| "2023-02-05".to_string());
             let txn_date = if raw_date.contains('-') {
@@ -1518,41 +1578,59 @@ impl QbXmlParser {
             let vendor_name = Self::extract_nested_tag(item_xml, "VendorRef", "FullName").unwrap_or_else(|| "Vendor Name".to_string());
             let vendor_tin = vendor_tins.get(&vendor_name).cloned().unwrap_or_else(|| "102-334-556-000".to_string());
 
-            let mut vc_line_accounts: Vec<String> = Vec::new();
+            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|&r| r > 0.0)
+                .unwrap_or(1.0);
+
+            let mut vc_memos: Vec<String> = Vec::new();
+            let mut vc_input_tax = 0.0;
             let exp_chunks: Vec<&str> = item_xml.split("<ExpenseLineRet>").skip(1).collect();
             for e_chunk in exp_chunks {
                 let end_e = e_chunk.find("</ExpenseLineRet>").unwrap_or(e_chunk.len());
                 let exp_xml = &e_chunk[..end_e];
-                if let Some(acct) = Self::extract_nested_tag(exp_xml, "AccountRef", "FullName") {
-                    let clean = Self::clean_qb_text(&acct);
-                    if !clean.is_empty() && !vc_line_accounts.contains(&clean) {
-                        vc_line_accounts.push(clean);
+                let acct_name = Self::extract_nested_tag(exp_xml, "AccountRef", "FullName").unwrap_or_default();
+                let acct_list_id = Self::extract_nested_tag(exp_xml, "AccountRef", "ListID").unwrap_or_default();
+                let acct_lower = Self::clean_qb_text(&acct_name).to_lowercase();
+                let acct_mapped = account_info_map
+                    .get(&acct_list_id)
+                    .or_else(|| account_info_map.get(&acct_lower))
+                    .cloned()
+                    .unwrap_or_default();
+                let memo_exp = Self::extract_tag_value(exp_xml, "Memo").unwrap_or_default();
+                if !memo_exp.trim().is_empty() {
+                    let clean_m = Self::clean_qb_text(&memo_exp);
+                    if !vc_memos.contains(&clean_m) {
+                        vc_memos.push(clean_m);
                     }
+                }
+                if acct_lower.contains("input tax") || acct_lower.contains("input vat") || acct_lower.contains("16410") || acct_mapped.contains("16410") || acct_mapped.contains("input tax") {
+                    let raw_amt: f64 = Self::extract_tag_value(exp_xml, "Amount")
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    vc_input_tax += (raw_amt * exchange_rate).abs();
                 }
             }
             let item_chunks: Vec<&str> = item_xml.split("<ItemLineRet>").skip(1).collect();
             for i_chunk in item_chunks {
                 let end_i = i_chunk.find("</ItemLineRet>").unwrap_or(i_chunk.len());
                 let line_xml = &i_chunk[..end_i];
-                let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
-                let item_account = Self::resolve_item_cogs_account(line_xml, &item_name, &item_cogs_map);
-                if !vc_line_accounts.contains(&item_account) {
-                    vc_line_accounts.push(item_account);
+                let desc = Self::extract_tag_value(line_xml, "Desc").unwrap_or_default();
+                if !desc.trim().is_empty() {
+                    let clean_d = Self::clean_qb_text(&desc);
+                    if !vc_memos.contains(&clean_d) {
+                        vc_memos.push(clean_d);
+                    }
                 }
             }
-            let vc_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
-            let description = if !vc_line_accounts.is_empty() {
-                vc_line_accounts.join(", ")
-            } else if !vc_memo.is_empty() {
+            let vc_memo = Self::extract_tag_value(header_xml, "Memo").unwrap_or_default();
+            let description = if !vc_memo.trim().is_empty() {
                 Self::clean_qb_text(&vc_memo)
+            } else if !vc_memos.is_empty() {
+                vc_memos.join("; ")
             } else {
-                "Purchases".to_string()
+                "".to_string()
             };
-
-            let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
-                .and_then(|s| s.parse::<f64>().ok())
-                .filter(|&r| r > 0.0)
-                .unwrap_or(1.0);
 
             let home_total: Option<f64> = Self::extract_tag_value(item_xml, "TotalAmountInHomeCurrency")
                 .and_then(|s| s.parse::<f64>().ok())
@@ -1569,6 +1647,7 @@ impl QbXmlParser {
 
             let vatable_base = -total_amount.abs();
             let net_purchases = vatable_base;
+            let input_vat = -((vc_input_tax * 100.0).round() / 100.0);
 
             entries.push(PurchaseJournalEntry {
                 id: None,
@@ -1581,7 +1660,7 @@ impl QbXmlParser {
                 bill_no,
                 amount: vatable_base,
                 discount: 0.0,
-                input_vat: 0.0,
+                input_vat,
                 net_purchases,
                 qb_txn_id: txn_id,
                 synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
@@ -2841,11 +2920,11 @@ impl QbXmlParser {
                 vendor_tin: "102-334-556-000".to_string(),
                 vendor_name: "Petron Fuel Corporation".to_string(),
                 address: "San Miguel Ave, Mandaluyong City".to_string(),
-                description: "Fuel and Oil Expense".to_string(),
+                description: "Monthly fleet diesel supply".to_string(),
                 bill_no: "BILL-2023-089".to_string(),
                 amount: 125000.00,
                 discount: 1250.00,
-                input_vat: 0.00,
+                input_vat: 15000.00,
                 net_purchases: 123750.00,
                 qb_txn_id: Some("QB-BILL-2001".to_string()),
                 synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
@@ -2857,11 +2936,11 @@ impl QbXmlParser {
                 vendor_tin: "205-998-112-000".to_string(),
                 vendor_name: "Toyota Pasig Service Center".to_string(),
                 address: "Ortigas Ave Ext, Pasig City".to_string(),
-                description: "Repairs & Maintenance".to_string(),
+                description: "Preventive maintenance and parts replacement".to_string(),
                 bill_no: "BILL-2023-104".to_string(),
                 amount: 84500.00,
                 discount: 1690.00,
-                input_vat: 0.00,
+                input_vat: 10140.00,
                 net_purchases: 82810.00,
                 qb_txn_id: Some("QB-BILL-2002".to_string()),
                 synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),

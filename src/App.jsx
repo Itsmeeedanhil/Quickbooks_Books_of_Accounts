@@ -71,6 +71,7 @@ export const App = () => {
   const [syncPrompt, setSyncPrompt] = useState(null); // { title: string, subtitle: string }
   const [syncElapsed, setSyncElapsed] = useState(0);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [hasAutoSyncedPurchases, setHasAutoSyncedPurchases] = useState(false);
   const [toast, setToast] = useState(null); // { type: 'success' | 'error', message: string }
 
   useEffect(() => {
@@ -143,6 +144,24 @@ export const App = () => {
   useEffect(() => {
     loadAllData();
   }, []);
+
+  useEffect(() => {
+    if (
+      activeJournal === 'purchase' &&
+      !hasAutoSyncedPurchases &&
+      !isSyncingModule &&
+      !isLoadingData &&
+      qbStatus?.is_connected
+    ) {
+      const needsPurchaseSync =
+        purchaseEntries.length === 0 ||
+        purchaseEntries.every((e) => !e.input_vat || Number(e.input_vat) === 0);
+      if (needsPurchaseSync) {
+        setHasAutoSyncedPurchases(true);
+        handleSyncPurchases();
+      }
+    }
+  }, [activeJournal, hasAutoSyncedPurchases, isSyncingModule, isLoadingData, qbStatus?.is_connected, purchaseEntries]);
 
   const handlePeriodChange = (newPeriod) => {
     setPeriod(newPeriod);
