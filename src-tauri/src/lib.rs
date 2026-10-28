@@ -12,8 +12,11 @@ pub fn run() {
     let qb_bridge = Arc::new(QuickBooksComBridge::new("Books of Accounts Program"));
     let db = Arc::new(AccessDatabase::new());
 
-    // Initialize MS Access database and local storage on startup
-    let _ = db.initialize();
+    // Initialize MS Access database and local storage in background thread so window launch never blocks
+    let db_init = Arc::clone(&db);
+    std::thread::spawn(move || {
+        let _ = db_init.initialize();
+    });
 
     let state = AppState {
         qb_bridge,

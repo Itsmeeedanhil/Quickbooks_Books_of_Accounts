@@ -7,6 +7,7 @@ use super::qbxml::{QbXmlBuilder, QbXmlParser};
 pub struct QuickBooksComBridge {
     pub app_name: String,
     pub cached_status: Mutex<Option<QbConnectionStatus>>,
+    pub request_lock: Mutex<()>,
 }
 
 impl QuickBooksComBridge {
@@ -14,11 +15,13 @@ impl QuickBooksComBridge {
         Self {
             app_name: app_name.to_string(),
             cached_status: Mutex::new(None),
+            request_lock: Mutex::new(()),
         }
     }
 
     /// Process a qbXML request string against QuickBooks Desktop via QBXMLRP2 COM
     pub fn process_qbxml_request(&self, request_xml: &str) -> Result<String, String> {
+        let _guard = self.request_lock.lock().unwrap_or_else(|e| e.into_inner());
         #[cfg(windows)]
         {
             let req_str = request_xml.to_string();

@@ -13,7 +13,7 @@ import {
 import { ExportToolbar } from './components/ExportToolbar';
 import { SettingsModal } from './components/SettingsModal';
 import { TransactionModal } from './components/TransactionModal';
-import { CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, X, RefreshCw, Database } from 'lucide-react';
 
 export const App = () => {
   const [activeJournal, setActiveJournal] = useState('sales');
@@ -68,8 +68,21 @@ export const App = () => {
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [isSyncingModule, setIsSyncingModule] = useState(false);
+  const [syncPrompt, setSyncPrompt] = useState(null); // { title: string, subtitle: string }
+  const [syncElapsed, setSyncElapsed] = useState(0);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [toast, setToast] = useState(null); // { type: 'success' | 'error', message: string }
+
+  useEffect(() => {
+    if (!syncPrompt) {
+      setSyncElapsed(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setSyncElapsed((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [syncPrompt]);
 
   const showToast = (type, message) => {
     setToast({ type, message });
@@ -79,20 +92,28 @@ export const App = () => {
   // Load initial data
   const loadAllData = async () => {
     try {
-      const [comp, map, qb, db] = await Promise.all([
+      const [comp, map, db] = await Promise.all([
         api.getCompanyProfile(),
         api.getFieldMapping(),
-        api.testQbConnection(),
         api.getDatabaseStatus(),
       ]);
       setCompany(comp);
       setFieldMapping(map);
-      setQbStatus(qb);
       setDbStatus(db);
     } catch (e) {
       console.error('Failed to load metadata', e);
     }
     await loadJournalData(period);
+
+    // Check live QB connection in background so initial UI load never waits
+    api.testQbConnection()
+      .then((qb) => {
+        setQbStatus(qb);
+        if (qb?.is_connected && qb?.company_name) {
+          api.getCompanyProfile().then(setCompany).catch(() => {});
+        }
+      })
+      .catch(() => {});
   };
 
   const loadJournalData = async (currentPeriod) => {
@@ -130,7 +151,12 @@ export const App = () => {
 
   // Dedicated Per-Report Sync Handlers
   const handleSyncSales = async () => {
+    if (isSyncingModule) return;
     setIsSyncingModule(true);
+    setSyncPrompt({
+      title: 'Syncing Sales Journal from QuickBooks...',
+      subtitle: `Querying Sales Invoices for period (${period}) via QBSDK 16.0 and updating MS Access Database.`,
+    });
     try {
       const liveSales = await api.syncSalesJournal(period);
       setSalesEntries(liveSales);
@@ -141,11 +167,17 @@ export const App = () => {
       showToast('error', `Failed to sync Sales Journal: ${String(err)}`);
     } finally {
       setIsSyncingModule(false);
+      setSyncPrompt(null);
     }
   };
 
   const handleSyncPurchases = async () => {
+    if (isSyncingModule) return;
     setIsSyncingModule(true);
+    setSyncPrompt({
+      title: 'Syncing Purchase Journal from QuickBooks...',
+      subtitle: `Querying Vendor Bills & COGS Accounts for period (${period}) via QBSDK 16.0 and updating MS Access Database.`,
+    });
     try {
       const livePurchases = await api.syncPurchaseJournal(period);
       setPurchaseEntries(livePurchases);
@@ -156,11 +188,17 @@ export const App = () => {
       showToast('error', `Failed to sync Purchase Journal: ${String(err)}`);
     } finally {
       setIsSyncingModule(false);
+      setSyncPrompt(null);
     }
   };
 
   const handleSyncReceipts = async () => {
+    if (isSyncingModule) return;
     setIsSyncingModule(true);
+    setSyncPrompt({
+      title: 'Syncing Cash Receipts Journal from QuickBooks...',
+      subtitle: `Querying Customer Payments & Sales Receipts for period (${period}) via QBSDK 16.0 and updating MS Access Database.`,
+    });
     try {
       const liveReceipts = await api.syncCashReceiptsJournal(period);
       setCashReceiptsEntries(liveReceipts);
@@ -171,11 +209,17 @@ export const App = () => {
       showToast('error', `Failed to sync Cash Receipts: ${String(err)}`);
     } finally {
       setIsSyncingModule(false);
+      setSyncPrompt(null);
     }
   };
 
   const handleSyncDisbursements = async () => {
+    if (isSyncingModule) return;
     setIsSyncingModule(true);
+    setSyncPrompt({
+      title: 'Syncing Cash Disbursements Journal from QuickBooks...',
+      subtitle: `Querying Checks & Bill Payments for period (${period}) via QBSDK 16.0 and updating MS Access Database.`,
+    });
     try {
       const liveDisbursements = await api.syncCashDisbursementsJournal(period);
       setCashDisbursementsEntries(liveDisbursements);
@@ -186,11 +230,17 @@ export const App = () => {
       showToast('error', `Failed to sync Cash Disbursements: ${String(err)}`);
     } finally {
       setIsSyncingModule(false);
+      setSyncPrompt(null);
     }
   };
 
   const handleSyncGeneralJournal = async () => {
+    if (isSyncingModule) return;
     setIsSyncingModule(true);
+    setSyncPrompt({
+      title: 'Syncing General Journal from QuickBooks...',
+      subtitle: `Querying Journal Entries for period (${period}) via QBSDK 16.0 and updating MS Access Database.`,
+    });
     try {
       const liveGJ = await api.syncGeneralJournal(period);
       setGeneralJournalEntries(liveGJ);
@@ -201,11 +251,17 @@ export const App = () => {
       showToast('error', `Failed to sync General Journal: ${String(err)}`);
     } finally {
       setIsSyncingModule(false);
+      setSyncPrompt(null);
     }
   };
 
   const handleSyncGeneralLedger = async () => {
+    if (isSyncingModule) return;
     setIsSyncingModule(true);
+    setSyncPrompt({
+      title: 'Syncing General Ledger from QuickBooks...',
+      subtitle: `Querying Chart of Accounts & Ledger Transactions for period (${period}) via QBSDK 16.0 and updating MS Access Database.`,
+    });
     try {
       const liveGL = await api.syncGeneralLedger(period);
       setGeneralLedgerEntries(liveGL);
@@ -216,6 +272,7 @@ export const App = () => {
       showToast('error', `Failed to sync General Ledger: ${String(err)}`);
     } finally {
       setIsSyncingModule(false);
+      setSyncPrompt(null);
     }
   };
 
@@ -285,16 +342,61 @@ export const App = () => {
         qbStatus={qbStatus}
         dbStatus={dbStatus}
         onRefreshQb={async () => {
-          const status = await api.testQbConnection();
-          setQbStatus(status);
-          const comp = await api.getCompanyProfile();
-          setCompany(comp);
-          await loadJournalData(period);
+          if (isSyncingModule) return;
+          setIsSyncingModule(true);
+          setSyncPrompt({
+            title: 'Connecting to QuickBooks Desktop...',
+            subtitle: 'Verifying QBSDK 16.0 COM connection and refreshing company profile & journal records.',
+          });
+          try {
+            const status = await api.testQbConnection();
+            setQbStatus(status);
+            const comp = await api.getCompanyProfile();
+            setCompany(comp);
+            await loadJournalData(period);
+          } finally {
+            setIsSyncingModule(false);
+            setSyncPrompt(null);
+          }
         }}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenDbFolder={() => api.openDatabaseFolder()}
         isLoadingData={isLoadingData}
       />
+
+      {/* Waiting / Syncing Prompt Modal Overlay */}
+      {syncPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs no-print">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6 flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
+            <div className="relative flex items-center justify-center w-14 h-14 rounded-full bg-emerald-50 border border-emerald-200 mb-4">
+              <RefreshCw className="w-7 h-7 text-emerald-600 animate-spin" />
+              <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-white shadow">
+                <Database className="w-3 h-3" />
+              </span>
+            </div>
+
+            <h3 className="text-base font-bold text-slate-900">
+              {syncPrompt.title}
+            </h3>
+
+            <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+              {syncPrompt.subtitle}
+            </p>
+
+            {/* Indeterminate Animated Progress Bar */}
+            <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden mt-5 border border-slate-200">
+              <div className="h-full bg-emerald-500 rounded-full animate-pulse w-full" />
+            </div>
+
+            <div className="flex items-center justify-between w-full mt-3 text-[11px] text-slate-500 font-medium">
+              <span>Please wait, do not close the window...</span>
+              <span className="font-mono font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                Elapsed: {String(Math.floor(syncElapsed / 60)).padStart(2, '0')}:{String(syncElapsed % 60).padStart(2, '0')}s
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating Notification Toast */}
       {toast && (

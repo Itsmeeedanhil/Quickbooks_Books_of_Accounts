@@ -164,6 +164,8 @@ function SafeSql($val) {{
     return "'" + $s.Replace("'", "''") + "'"
 }}
 
+try {{ $conn.BeginTrans() | Out-Null }} catch {{}}
+
 # 1. Company Profile
 try {{
     $conn.Execute("DELETE FROM tbl_CompanyProfile") | Out-Null
@@ -226,6 +228,8 @@ try {{
     }}
 }} catch {{}}
 
+try {{ $conn.CommitTrans() | Out-Null }} catch {{}}
+
 $conn.Close()
 [System.Runtime.InteropServices.Marshal]::ReleaseComObject($conn) | Out-Null
 Remove-Item $jsonPath -Force -ErrorAction SilentlyContinue | Out-Null
@@ -240,7 +244,7 @@ Remove-Item $jsonPath -Force -ErrorAction SilentlyContinue | Out-Null
                 use std::os::windows::process::CommandExt;
                 cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
             }
-            let _ = cmd.output();
+            let _ = cmd.spawn();
         }
 
         Ok(())
@@ -331,23 +335,35 @@ Remove-Item $jsonPath -Force -ErrorAction SilentlyContinue | Out-Null
     pub fn sync_all_from_qb(
         &self,
         company: Option<CompanyProfile>,
-        sales: Vec<SalesJournalEntry>,
-        purchases: Vec<PurchaseJournalEntry>,
-        receipts: Vec<CashReceiptsJournalEntry>,
-        disbursements: Vec<CashDisbursementsJournalEntry>,
-        general_journal: Vec<GeneralJournalEntry>,
-        general_ledger: Vec<GeneralLedgerEntry>,
+        sales: Option<Vec<SalesJournalEntry>>,
+        purchases: Option<Vec<PurchaseJournalEntry>>,
+        receipts: Option<Vec<CashReceiptsJournalEntry>>,
+        disbursements: Option<Vec<CashDisbursementsJournalEntry>>,
+        general_journal: Option<Vec<GeneralJournalEntry>>,
+        general_ledger: Option<Vec<GeneralLedgerEntry>>,
     ) -> Result<(), String> {
         let mut cache = self.load_local_cache();
         if let Some(comp) = company {
             cache.company = comp;
         }
-        cache.sales_journal = sales;
-        cache.purchase_journal = purchases;
-        cache.cash_receipts_journal = receipts;
-        cache.cash_disbursements_journal = disbursements;
-        cache.general_journal = general_journal;
-        cache.general_ledger = general_ledger;
+        if let Some(s) = sales {
+            cache.sales_journal = s;
+        }
+        if let Some(p) = purchases {
+            cache.purchase_journal = p;
+        }
+        if let Some(r) = receipts {
+            cache.cash_receipts_journal = r;
+        }
+        if let Some(d) = disbursements {
+            cache.cash_disbursements_journal = d;
+        }
+        if let Some(gj) = general_journal {
+            cache.general_journal = gj;
+        }
+        if let Some(gl) = general_ledger {
+            cache.general_ledger = gl;
+        }
         self.save_local_cache(&cache)?;
         let _ = self.sync_records_to_accdb(&cache);
         Ok(())
