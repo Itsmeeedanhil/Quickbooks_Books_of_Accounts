@@ -1277,6 +1277,7 @@ impl QbXmlParser {
 
             let mut gross_amount = 0.0;
             let mut total_wtax = 0.0;
+            let mut explicit_input_tax = 0.0;
             let mut first_item_desc = String::new();
             let mut line_accounts: Vec<String> = Vec::new();
 
@@ -1295,10 +1296,24 @@ impl QbXmlParser {
 
                 let item_lower = item_name.to_lowercase();
                 let desc_lower = desc.to_lowercase();
+                let mapped_acct_lower = item_cogs_map
+                    .get(&Self::clean_qb_text(&item_name))
+                    .or_else(|| item_cogs_map.get(&item_name))
+                    .map(|s| s.to_lowercase())
+                    .unwrap_or_default();
 
-                let is_tax = item_lower.contains("input tax") 
-                    || item_lower.contains("input vat") 
-                    || item_lower.contains("evat");
+                let is_tax = item_lower.contains("input tax")
+                    || item_lower.contains("input vat")
+                    || item_lower.contains("evat")
+                    || item_lower.contains("16410")
+                    || item_lower.contains("vat - input")
+                    || item_lower.contains("vat input")
+                    || item_lower.contains("deferred input")
+                    || desc_lower.contains("input tax")
+                    || desc_lower.contains("input vat")
+                    || mapped_acct_lower.contains("input tax")
+                    || mapped_acct_lower.contains("input vat")
+                    || mapped_acct_lower.contains("16410");
 
                 let is_wtax = item_lower.contains("withholding") 
                     || item_lower.contains("with holding") 
@@ -1312,8 +1327,16 @@ impl QbXmlParser {
                     || desc_lower.contains("cwt") 
                     || desc_lower.contains("discount");
 
+                let line_tax_amt: f64 = Self::extract_tag_value(line_xml, "TaxAmount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| v * exchange_rate)
+                    .unwrap_or(0.0);
+                if line_tax_amt > 0.0 && !is_tax {
+                    explicit_input_tax += line_tax_amt;
+                }
+
                 if is_tax {
-                    // VAT excluded from purchase journal
+                    explicit_input_tax += line_amt.abs();
                 } else if line_amt < 0.0 || is_wtax {
                     total_wtax += line_amt.abs();
                 } else if line_amt > 0.0 {
@@ -1344,9 +1367,15 @@ impl QbXmlParser {
                 let acct_lower = acct_name.to_lowercase();
                 let memo_lower = memo_exp.to_lowercase();
 
-                let is_tax = acct_lower.contains("input tax") 
-                    || acct_lower.contains("input vat") 
-                    || acct_lower.contains("evat");
+                let is_tax = acct_lower.contains("input tax")
+                    || acct_lower.contains("input vat")
+                    || acct_lower.contains("evat")
+                    || acct_lower.contains("16410")
+                    || acct_lower.contains("vat - input")
+                    || acct_lower.contains("vat input")
+                    || acct_lower.contains("deferred input")
+                    || memo_lower.contains("input tax")
+                    || memo_lower.contains("input vat");
 
                 let is_wtax = acct_lower.contains("withholding") 
                     || acct_lower.contains("with holding")
@@ -1362,8 +1391,16 @@ impl QbXmlParser {
                     || memo_lower.contains("cwt") 
                     || memo_lower.contains("discount");
 
+                let exp_tax_amt: f64 = Self::extract_tag_value(exp_xml, "TaxAmount")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|v| v * exchange_rate)
+                    .unwrap_or(0.0);
+                if exp_tax_amt > 0.0 && !is_tax {
+                    explicit_input_tax += exp_tax_amt;
+                }
+
                 if is_tax {
-                    // VAT excluded from purchase journal
+                    explicit_input_tax += exp_amt.abs();
                 } else if exp_amt < 0.0 || is_wtax {
                     total_wtax += exp_amt.abs();
                 } else if exp_amt > 0.0 {
@@ -1397,6 +1434,21 @@ impl QbXmlParser {
                 total_wtax += suggested_disc * exchange_rate;
             }
 
+            // 4. Sales Tax / Input Tax tag from QuickBooks
+            let qb_sales_tax: f64 = Self::extract_tag_value(item_xml, "SalesTaxTotal")
+                .or_else(|| Self::extract_tag_value(item_xml, "TaxAmount"))
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|v| v * exchange_rate)
+                .unwrap_or(0.0);
+
+            let input_vat = if explicit_input_tax > 0.0 {
+                ((explicit_input_tax) * 100.0).round() / 100.0
+            } else if qb_sales_tax > 0.0 {
+                ((qb_sales_tax) * 100.0).round() / 100.0
+            } else {
+                0.0
+            };
+
             let amount_due: f64 = if let Some(had) = home_amount_due {
                 had
             } else {
@@ -1424,13 +1476,12 @@ impl QbXmlParser {
             let amount = if gross_amount > 0.0 {
                 ((gross_amount) * 100.0).round() / 100.0
             } else if amount_due > 0.0 {
-                ((amount_due + discount) * 100.0).round() / 100.0
+                (((amount_due - input_vat) + discount).max(0.0) * 100.0).round() / 100.0
             } else {
                 0.0
             };
 
-            let input_vat = 0.0;
-            let net_purchases = ((amount - discount).max(0.0) * 100.0).round() / 100.0;
+            let net_purchases = (((amount - discount).max(0.0) + input_vat) * 100.0).round() / 100.0;
 
             entries.push(PurchaseJournalEntry {
                 id: None,

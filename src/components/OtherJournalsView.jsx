@@ -23,9 +23,10 @@ export const PurchaseJournalView = ({
     (acc, e) => ({
       amount: acc.amount + (Number(e.amount) || 0),
       discount: acc.discount + (Number(e.discount) || 0),
+      vat: acc.vat + (Number(e.input_vat) || 0),
       net: acc.net + (Number(e.net_purchases) || 0),
     }),
-    { amount: 0, discount: 0, net: 0 }
+    { amount: 0, discount: 0, vat: 0, net: 0 }
   );
 
   const formatCurrency = (num) =>
@@ -78,13 +79,14 @@ export const PurchaseJournalView = ({
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[75px]">Bill No.</th>
                 <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Amount</th>
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[95px]">Withholding Tax</th>
+                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[85px]">Input Tax</th>
                 <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Net Purchases</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-300">
               {filteredEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                  <td colSpan={10} className="py-12 text-center text-slate-400">
                     <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                     <p className="font-medium text-slate-600">No Purchase Bills found for this period.</p>
                     <p className="text-[11px] text-slate-400 mt-1">
@@ -105,6 +107,9 @@ export const PurchaseJournalView = ({
                     <td className={`py-1 px-2 text-right font-mono whitespace-nowrap ${Number(item.discount) > 0 ? 'text-amber-800 font-semibold' : 'text-slate-400'}`}>
                       {formatCurrency(item.discount)}
                     </td>
+                    <td className={`py-1 px-2.5 text-right font-mono whitespace-nowrap ${Number(item.input_vat) > 0 ? 'text-emerald-800 font-medium' : 'text-slate-400'}`}>
+                      {formatCurrency(item.input_vat)}
+                    </td>
                     <td className="py-1 px-2.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap">{formatCurrency(item.net_purchases)}</td>
                   </tr>
                 ))
@@ -117,6 +122,9 @@ export const PurchaseJournalView = ({
                   <td className="py-2 px-2.5 text-right font-mono text-xs whitespace-nowrap">{formatCurrency(totals.amount)}</td>
                   <td className={`py-2 px-2 text-right font-mono text-xs whitespace-nowrap ${totals.discount > 0 ? 'text-amber-900 font-bold' : 'text-slate-700'}`}>
                     {formatCurrency(totals.discount)}
+                  </td>
+                  <td className="py-2 px-2.5 text-right font-mono text-xs text-emerald-900 whitespace-nowrap">
+                    {formatCurrency(totals.vat)}
                   </td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">{formatCurrency(totals.net)}</td>
                 </tr>

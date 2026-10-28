@@ -274,29 +274,32 @@
     white-space: nowrap !important;
   }
 
-  /* Purchase Journal 9-Column Specific Print Widths */
+  /* Purchase Journal 10-Column Specific Print Widths */
   table.purchase-journal-table th:nth-child(1),
-  table.purchase-journal-table td:nth-child(1) { width: 7.5% !important; }
+  table.purchase-journal-table td:nth-child(1) { width: 7% !important; }
   table.purchase-journal-table th:nth-child(2),
-  table.purchase-journal-table td:nth-child(2) { width: 10.5% !important; }
+  table.purchase-journal-table td:nth-child(2) { width: 10% !important; }
   table.purchase-journal-table th:nth-child(3),
-  table.purchase-journal-table td:nth-child(3) { width: 16% !important; }
+  table.purchase-journal-table td:nth-child(3) { width: 15% !important; }
   table.purchase-journal-table th:nth-child(4),
-  table.purchase-journal-table td:nth-child(4) { width: 16% !important; }
+  table.purchase-journal-table td:nth-child(4) { width: 14.5% !important; }
   table.purchase-journal-table th:nth-child(5),
-  table.purchase-journal-table td:nth-child(5) { width: 17% !important; }
+  table.purchase-journal-table td:nth-child(5) { width: 14% !important; }
   table.purchase-journal-table th:nth-child(6),
-  table.purchase-journal-table td:nth-child(6) { width: 8% !important; }
+  table.purchase-journal-table td:nth-child(6) { width: 7.5% !important; }
   table.purchase-journal-table th:nth-child(7),
   table.purchase-journal-table td:nth-child(7) { width: 8.5% !important; }
   table.purchase-journal-table th:nth-child(8),
-  table.purchase-journal-table td:nth-child(8) { width: 8% !important; }
+  table.purchase-journal-table td:nth-child(8) { width: 7.5% !important; }
   table.purchase-journal-table th:nth-child(9),
-  table.purchase-journal-table td:nth-child(9) { width: 8.5% !important; }
+  table.purchase-journal-table td:nth-child(9) { width: 7.5% !important; }
+  table.purchase-journal-table th:nth-child(10),
+  table.purchase-journal-table td:nth-child(10) { width: 8.5% !important; }
 
   table.purchase-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(7):not([colspan]),
   table.purchase-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(8):not([colspan]),
-  table.purchase-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(9):not([colspan]) {
+  table.purchase-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(9):not([colspan]),
+  table.purchase-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(10):not([colspan]) {
     text-align: right !important;
     white-space: nowrap !important;
   }

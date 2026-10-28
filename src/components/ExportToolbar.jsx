@@ -115,6 +115,7 @@ export const ExportToolbar = ({
           'Bill No.',
           'Amount',
           'Withholding Tax',
+          'Input Tax',
           'Net Purchases',
         ];
         colDefs = [
@@ -122,8 +123,9 @@ export const ExportToolbar = ({
           { width: 20, align: 'center' },
           { width: 36, align: 'left' },
           { width: 42, align: 'left' },
-          { width: 36, align: 'left' },
+          { width: 34, align: 'left' },
           { width: 18, align: 'center' },
+          { width: 18, align: 'right', isNum: true },
           { width: 18, align: 'right', isNum: true },
           { width: 18, align: 'right', isNum: true },
           { width: 18, align: 'right', isNum: true },
@@ -402,13 +404,15 @@ export const ExportToolbar = ({
         });
         for (let c = 1; c <= numCols; c++) totRow.getCell(c).border = doubleBottomBorder;
       } else if (activeJournal === 'purchase') {
-        let tAmt = 0, tDisc = 0, tNet = 0;
+        let tAmt = 0, tDisc = 0, tVat = 0, tNet = 0;
         data.forEach((item) => {
           const amt = Number(item.amount) || 0;
           const disc = Number(item.discount) || 0;
+          const vat = Number(item.input_vat) || 0;
           const net = Number(item.net_purchases) || 0;
           tAmt += amt;
           tDisc += disc;
+          tVat += vat;
           tNet += net;
 
           const row = ws.addRow([
@@ -420,6 +424,7 @@ export const ExportToolbar = ({
             item.bill_no,
             amt,
             disc,
+            vat,
             net,
           ]);
           colDefs.forEach((col, idx) => {
@@ -430,11 +435,11 @@ export const ExportToolbar = ({
           });
         });
 
-        const totRow = ws.addRow(['TOTAL :', '', '', '', '', '', tAmt, tDisc, tNet]);
+        const totRow = ws.addRow(['TOTAL :', '', '', '', '', '', tAmt, tDisc, tVat, tNet]);
         ws.mergeCells(totRow.number, 1, totRow.number, 6);
         totRow.getCell(1).font = { name: 'Calibri', size: 9, bold: true };
         totRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
-        [7, 8, 9].forEach((cIdx) => {
+        [7, 8, 9, 10].forEach((cIdx) => {
           const c = totRow.getCell(cIdx);
           c.font = { name: 'Calibri', size: 9, bold: true };
           c.numFmt = '#,##0.00;(#,##0.00);"-"';
@@ -698,6 +703,7 @@ export const ExportToolbar = ({
             'Bill No.',
             'Amount',
             'Withholding Tax',
+            'Input Tax',
             'Net Purchases',
           ],
         ];
@@ -711,11 +717,13 @@ export const ExportToolbar = ({
           item.bill_no,
           formatCurrency(item.amount),
           formatCurrency(item.discount),
+          formatCurrency(item.input_vat),
           formatCurrency(item.net_purchases),
         ]);
 
         const tAmt = data.reduce((s, i) => s + (Number(i.amount) || 0), 0);
         const tDisc = data.reduce((s, i) => s + (Number(i.discount) || 0), 0);
+        const tVat = data.reduce((s, i) => s + (Number(i.input_vat) || 0), 0);
         const tNet = data.reduce((s, i) => s + (Number(i.net_purchases) || 0), 0);
 
         tableFoot = [
@@ -723,6 +731,7 @@ export const ExportToolbar = ({
             { content: 'TOTAL :', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold' } },
             { content: formatCurrency(tAmt), styles: { halign: 'right', fontStyle: 'bold' } },
             { content: formatCurrency(tDisc), styles: { halign: 'right', fontStyle: 'bold' } },
+            { content: formatCurrency(tVat), styles: { halign: 'right', fontStyle: 'bold' } },
             { content: formatCurrency(tNet), styles: { halign: 'right', fontStyle: 'bold' } },
           ],
         ];
@@ -730,13 +739,14 @@ export const ExportToolbar = ({
         columnStyles = {
           0: { halign: 'center', cellWidth: 55 },
           1: { halign: 'center', cellWidth: 80 },
-          2: { halign: 'left', cellWidth: 125 },
-          3: { halign: 'left', cellWidth: 145 },
-          4: { halign: 'left', cellWidth: 135 },
-          5: { halign: 'center', cellWidth: 60 },
-          6: { halign: 'right', cellWidth: 70 },
-          7: { halign: 'right', cellWidth: 65 },
-          8: { halign: 'right', cellWidth: 70 },
+          2: { halign: 'left', cellWidth: 115 },
+          3: { halign: 'left', cellWidth: 135 },
+          4: { halign: 'left', cellWidth: 115 },
+          5: { halign: 'center', cellWidth: 58 },
+          6: { halign: 'right', cellWidth: 62 },
+          7: { halign: 'right', cellWidth: 58 },
+          8: { halign: 'right', cellWidth: 58 },
+          9: { halign: 'right', cellWidth: 65 },
         };
       } else if (activeJournal === 'cash_receipts') {
         tableHead = [
@@ -1067,15 +1077,18 @@ export const ExportToolbar = ({
         'Bill No.',
         'Amount',
         'Withholding Tax',
+        'Input Tax',
         'Net Purchases',
       ];
-      let tAmt = 0, tDisc = 0, tNet = 0;
+      let tAmt = 0, tDisc = 0, tVat = 0, tNet = 0;
       data.forEach((item) => {
         const amt = Number(item.amount) || 0;
         const disc = Number(item.discount) || 0;
+        const vat = Number(item.input_vat) || 0;
         const net = Number(item.net_purchases) || 0;
         tAmt += amt;
         tDisc += disc;
+        tVat += vat;
         tNet += net;
         rows.push([
           item.txn_date || '',
@@ -1086,10 +1099,11 @@ export const ExportToolbar = ({
           item.bill_no || '',
           amt.toFixed(2),
           disc.toFixed(2),
+          vat.toFixed(2),
           net.toFixed(2),
         ]);
       });
-      totals = ['TOTAL :', '', '', '', '', '', tAmt.toFixed(2), tDisc.toFixed(2), tNet.toFixed(2)];
+      totals = ['TOTAL :', '', '', '', '', '', tAmt.toFixed(2), tDisc.toFixed(2), tVat.toFixed(2), tNet.toFixed(2)];
     } else if (activeJournal === 'cash_receipts') {
       headers = [
         'Date',
