@@ -293,13 +293,10 @@ export const CashDisbursementsJournalView = ({
 
   const totals = filteredEntries.reduce(
     (acc, e) => ({
-      gross: acc.gross + (Number(e.gross_amount) || 0),
-      wtax: acc.wtax + (Number(e.withholding_tax) || 0),
-      net: acc.net + (Number(e.net_disbursement) || 0),
-      debit: acc.debit + (e.debit !== undefined ? Number(e.debit) : (Number(e.net_disbursement) || 0)),
-      credit: acc.credit + (e.credit !== undefined ? Number(e.credit) : (Number(e.net_disbursement) || 0)),
+      debit: acc.debit + (Number(e.debit) || 0),
+      credit: acc.credit + (Number(e.credit) || 0),
     }),
-    { gross: 0, wtax: 0, net: 0, debit: 0, credit: 0 }
+    { debit: 0, credit: 0 }
   );
 
   const formatCurrency = (num) =>
@@ -348,16 +345,14 @@ export const CashDisbursementsJournalView = ({
                 <th className="py-2 px-2.5 text-center min-w-[150px]">Payee Name</th>
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[75px]">Check No.</th>
                 <th className="py-2 px-2.5 text-center min-w-[160px]">Description</th>
-                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Gross Amount</th>
-                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[100px]">Net Disbursement</th>
-                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Debit</th>
-                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[95px]">Credit</th>
+                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[100px]">Debit</th>
+                <th className="py-2 px-2.5 text-center whitespace-nowrap min-w-[100px]">Credit</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-300">
               {filteredEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={6} className="py-12 text-center text-slate-400">
                     <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                     <p className="font-medium text-slate-600">No Cash Disbursements found for this period.</p>
                     <p className="text-[11px] text-slate-400 mt-1">
@@ -366,26 +361,47 @@ export const CashDisbursementsJournalView = ({
                   </td>
                 </tr>
               ) : (
-                filteredEntries.map((item, index) => (
-                  <tr key={item.id || index} className="hover:bg-emerald-50/30 transition divide-x divide-slate-300 text-slate-800">
-                    <td className="py-1 px-2 text-center font-mono whitespace-nowrap">{item.txn_date}</td>
-                    <td className="py-1 px-2.5 font-semibold text-slate-900">{item.payee_name}</td>
-                    <td className="py-1 px-2 text-center font-mono whitespace-nowrap">{item.check_no}</td>
-                    <td className="py-1 px-2.5 text-slate-600 leading-tight text-[11px]">{item.description}</td>
-                    <td className="py-1 px-2.5 text-right font-mono whitespace-nowrap">{formatCurrency(item.gross_amount)}</td>
-                    <td className="py-1 px-2.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap">{formatCurrency(item.net_disbursement)}</td>
-                    <td className="py-1 px-2.5 text-right font-mono font-semibold text-slate-900 whitespace-nowrap">{formatCurrency(item.debit !== undefined ? item.debit : item.net_disbursement)}</td>
-                    <td className="py-1 px-2.5 text-right font-mono font-semibold text-slate-900 whitespace-nowrap">{formatCurrency(item.credit !== undefined ? item.credit : item.net_disbursement)}</td>
-                  </tr>
-                ))
+                filteredEntries.map((item, index) => {
+                  const isFirstLine =
+                    index === 0 ||
+                    item.check_no !== filteredEntries[index - 1].check_no ||
+                    item.txn_date !== filteredEntries[index - 1].txn_date ||
+                    (item.qb_txn_id && item.qb_txn_id !== filteredEntries[index - 1].qb_txn_id);
+
+                  return (
+                    <tr
+                      key={item.id || index}
+                      className={`hover:bg-emerald-50/30 transition divide-x divide-slate-300 text-slate-800 ${
+                        isFirstLine && index > 0 ? 'border-t-2 border-slate-400' : ''
+                      }`}
+                    >
+                      <td className="py-1 px-2 text-center font-mono whitespace-nowrap">
+                        {isFirstLine ? item.txn_date : ''}
+                      </td>
+                      <td className="py-1 px-2.5 font-semibold text-slate-900">
+                        {isFirstLine ? cleanText(item.payee_name) : ''}
+                      </td>
+                      <td className="py-1 px-2 text-center font-mono whitespace-nowrap">
+                        {isFirstLine ? item.check_no : ''}
+                      </td>
+                      <td className="py-1 px-2.5 font-semibold text-slate-900">
+                        {cleanText(item.description)}
+                      </td>
+                      <td className="py-1 px-2.5 text-right font-mono font-medium whitespace-nowrap">
+                        {item.debit > 0 ? formatCurrency(item.debit) : ''}
+                      </td>
+                      <td className="py-1 px-2.5 text-right font-mono font-medium whitespace-nowrap">
+                        {item.credit > 0 ? formatCurrency(item.credit) : ''}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
             {filteredEntries.length > 0 && (
               <tfoot>
                 <tr className="bg-slate-50 font-bold border-t border-b-4 border-double border-slate-800 text-slate-900 divide-x divide-slate-400">
                   <td colSpan={4} className="py-2 px-3 text-right uppercase tracking-wider">TOTAL :</td>
-                  <td className="py-2 px-2.5 text-right font-mono text-xs whitespace-nowrap">{formatCurrency(totals.gross)}</td>
-                  <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">{formatCurrency(totals.net)}</td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">{formatCurrency(totals.debit)}</td>
                   <td className="py-2 px-2.5 text-right font-mono text-xs font-black text-slate-950 whitespace-nowrap">{formatCurrency(totals.credit)}</td>
                 </tr>

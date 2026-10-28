@@ -381,44 +381,77 @@ Remove-Item $jsonPath -Force -ErrorAction SilentlyContinue | Out-Null
 
     pub fn get_cash_receipts_journal(&self, _period: &str) -> Vec<CashReceiptsJournalEntry> {
         let raw_entries = self.load_local_cache().cash_receipts_journal;
+        let has_multi_line = raw_entries.iter().any(|e| e.debit > 0.0 || e.credit > 0.0);
+        if has_multi_line {
+            return raw_entries;
+        }
+
         let mut expanded = Vec::new();
 
         for entry in raw_entries {
-            if entry.debit == 0.0 && entry.credit == 0.0 {
-                let amt = if entry.gross_amount > 0.0 {
-                    entry.gross_amount
-                } else {
-                    entry.net_collection
-                };
-                let credit_acct = if entry.description.eq_ignore_ascii_case("Customer Collection") {
-                    "Accounts Receivable".to_string()
-                } else if entry.description.eq_ignore_ascii_case("Bank Deposit") {
-                    "Undeposited Funds".to_string()
-                } else {
-                    "Sales".to_string()
-                };
-
-                let mut debit_row = entry.clone();
-                debit_row.description = "Undeposited Funds".to_string();
-                debit_row.debit = amt;
-                debit_row.credit = 0.0;
-                expanded.push(debit_row);
-
-                let mut credit_row = entry;
-                credit_row.description = credit_acct;
-                credit_row.debit = 0.0;
-                credit_row.credit = amt;
-                expanded.push(credit_row);
+            let amt = if entry.gross_amount > 0.0 {
+                entry.gross_amount
             } else {
-                expanded.push(entry);
-            }
+                entry.net_collection
+            };
+            let credit_acct = if entry.description.eq_ignore_ascii_case("Customer Collection") {
+                "Accounts Receivable".to_string()
+            } else if entry.description.eq_ignore_ascii_case("Bank Deposit") {
+                "Undeposited Funds".to_string()
+            } else {
+                "Sales".to_string()
+            };
+
+            let mut debit_row = entry.clone();
+            debit_row.description = "Undeposited Funds".to_string();
+            debit_row.debit = amt;
+            debit_row.credit = 0.0;
+            expanded.push(debit_row);
+
+            let mut credit_row = entry;
+            credit_row.description = credit_acct;
+            credit_row.debit = 0.0;
+            credit_row.credit = amt;
+            expanded.push(credit_row);
         }
 
         expanded
     }
 
     pub fn get_cash_disbursements_journal(&self, _period: &str) -> Vec<CashDisbursementsJournalEntry> {
-        self.load_local_cache().cash_disbursements_journal
+        let raw_entries = self.load_local_cache().cash_disbursements_journal;
+        let has_multi_line = raw_entries.iter().any(|e| e.debit > 0.0 || e.credit > 0.0);
+        if has_multi_line {
+            return raw_entries;
+        }
+
+        let mut expanded = Vec::new();
+        for entry in raw_entries {
+            let amt = if entry.gross_amount > 0.0 {
+                entry.gross_amount
+            } else {
+                entry.net_disbursement
+            };
+            let debit_acct = if entry.description.trim().is_empty() {
+                "Accounts Payable".to_string()
+            } else {
+                entry.description.clone()
+            };
+
+            let mut debit_row = entry.clone();
+            debit_row.description = debit_acct;
+            debit_row.debit = amt;
+            debit_row.credit = 0.0;
+            expanded.push(debit_row);
+
+            let mut credit_row = entry;
+            credit_row.description = "Cash in Bank".to_string();
+            credit_row.debit = 0.0;
+            credit_row.credit = amt;
+            expanded.push(credit_row);
+        }
+
+        expanded
     }
 
     pub fn get_general_journal(&self, _period: &str) -> Vec<GeneralJournalEntry> {

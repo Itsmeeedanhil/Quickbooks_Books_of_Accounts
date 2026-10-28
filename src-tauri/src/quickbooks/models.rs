@@ -90,6 +90,10 @@ pub struct CashDisbursementsJournalEntry {
     pub gross_amount: f64,
     pub withholding_tax: f64,
     pub net_disbursement: f64,
+    #[serde(default)]
+    pub debit: f64,
+    #[serde(default)]
+    pub credit: f64,
     pub qb_txn_id: Option<String>,
     pub synced_at: Option<String>,
 }

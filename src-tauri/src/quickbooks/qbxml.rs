@@ -1960,6 +1960,7 @@ impl QbXmlParser {
     pub fn parse_cash_disbursements_journal(xml: &str, period_ended: &str) -> Vec<CashDisbursementsJournalEntry> {
         let mut entries = Vec::new();
         let item_cogs_map = Self::parse_item_cogs_accounts(xml);
+        let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
         // 1. Standard Checks (<CheckRet>)
         let chk_chunks: Vec<&str> = xml.split("<CheckRet>").skip(1).collect();
@@ -1979,6 +1980,20 @@ impl QbXmlParser {
                 .or_else(|| Self::extract_tag_value(item_xml, "Payee"))
                 .unwrap_or_else(|| "Payee Name".to_string());
 
+            let header_end = item_xml
+                .find("<ExpenseLineRet>")
+                .into_iter()
+                .chain(item_xml.find("<ItemLineRet>"))
+                .chain(item_xml.find("<ItemGroupLineRet>"))
+                .min()
+                .unwrap_or(item_xml.len());
+            let header_xml = &item_xml[..header_end];
+
+            let bank_account = Self::extract_nested_tag(header_xml, "AccountRef", "FullName")
+                .map(|s| Self::clean_qb_text(&s))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "Cash in Bank".to_string());
+
             let exchange_rate: f64 = Self::extract_tag_value(item_xml, "ExchangeRate")
                 .and_then(|s| s.parse::<f64>().ok())
                 .filter(|&r| r > 0.0)
@@ -1992,23 +2007,55 @@ impl QbXmlParser {
             let total_check_amt: f64 = if let Some(ht) = home_total {
                 ht
             } else {
-                Self::extract_tag_value(item_xml, "Amount")
+                Self::extract_tag_value(header_xml, "Amount")
+                    .or_else(|| Self::extract_tag_value(item_xml, "Amount"))
                     .and_then(|s| s.parse::<f64>().ok())
                     .map(|v| v * exchange_rate)
                     .unwrap_or(0.0)
             };
 
-            // Extract Account names from Expense Lines
-            let mut line_accounts: Vec<String> = Vec::new();
+            let gross_amount = (total_check_amt * 100.0).round() / 100.0;
+
+            let mut debit_lines: Vec<(String, f64)> = Vec::new();
+            let mut credit_lines: Vec<(String, f64)> = Vec::new();
+            let mut fallback_acct: Option<String> = None;
+
+            // Extract Account names and amounts from Expense Lines
             let exp_chunks: Vec<&str> = item_xml.split("<ExpenseLineRet>").skip(1).collect();
             for e_chunk in exp_chunks {
                 let end_e = e_chunk.find("</ExpenseLineRet>").unwrap_or(e_chunk.len());
                 let exp_xml = &e_chunk[..end_e];
 
-                if let Some(acct) = Self::extract_nested_tag(exp_xml, "AccountRef", "FullName") {
-                    let clean = Self::clean_qb_text(&acct);
-                    if !clean.is_empty() && !line_accounts.contains(&clean) {
-                        line_accounts.push(clean);
+                let acct = Self::extract_nested_tag(exp_xml, "AccountRef", "FullName")
+                    .map(|s| Self::clean_qb_text(&s))
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "Uncategorized Expenses".to_string());
+
+                if fallback_acct.is_none() {
+                    fallback_acct = Some(acct.clone());
+                }
+
+                let line_amt: f64 = Self::extract_tag_value(exp_xml, "AmountInHomeCurrency")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or_else(|| {
+                        Self::extract_tag_value(exp_xml, "Amount")
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .map(|v| ((v * exchange_rate) * 100.0).round() / 100.0)
+                            .unwrap_or(0.0)
+                    });
+
+                if line_amt > 0.0 {
+                    if let Some(existing) = debit_lines.iter_mut().find(|(a, _)| a == &acct) {
+                        existing.1 = ((existing.1 + line_amt) * 100.0).round() / 100.0;
+                    } else {
+                        debit_lines.push((acct, line_amt));
+                    }
+                } else if line_amt < 0.0 {
+                    let abs_amt = line_amt.abs();
+                    if let Some(existing) = credit_lines.iter_mut().find(|(a, _)| a == &acct) {
+                        existing.1 = ((existing.1 + abs_amt) * 100.0).round() / 100.0;
+                    } else {
+                        credit_lines.push((acct, abs_amt));
                     }
                 }
             }
@@ -2021,38 +2068,89 @@ impl QbXmlParser {
 
                 let item_name = Self::extract_nested_tag(line_xml, "ItemRef", "FullName").unwrap_or_default();
                 let item_account = Self::resolve_item_cogs_account(line_xml, &item_name, &item_cogs_map);
-                if !line_accounts.contains(&item_account) {
-                    line_accounts.push(item_account);
+
+                if fallback_acct.is_none() && !item_account.is_empty() {
+                    fallback_acct = Some(item_account.clone());
+                }
+
+                let line_amt: f64 = Self::extract_tag_value(line_xml, "AmountInHomeCurrency")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or_else(|| {
+                        Self::extract_tag_value(line_xml, "Amount")
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .map(|v| ((v * exchange_rate) * 100.0).round() / 100.0)
+                            .unwrap_or(0.0)
+                    });
+
+                if line_amt > 0.0 {
+                    if let Some(existing) = debit_lines.iter_mut().find(|(a, _)| a == &item_account) {
+                        existing.1 = ((existing.1 + line_amt) * 100.0).round() / 100.0;
+                    } else {
+                        debit_lines.push((item_account, line_amt));
+                    }
+                } else if line_amt < 0.0 {
+                    let abs_amt = line_amt.abs();
+                    if let Some(existing) = credit_lines.iter_mut().find(|(a, _)| a == &item_account) {
+                        existing.1 = ((existing.1 + abs_amt) * 100.0).round() / 100.0;
+                    } else {
+                        credit_lines.push((item_account, abs_amt));
+                    }
                 }
             }
 
-            let check_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
+            if debit_lines.is_empty() {
+                let default_debit_acct = fallback_acct.unwrap_or_else(|| "Uncategorized Expenses".to_string());
+                debit_lines.push((default_debit_acct, gross_amount));
+            }
 
-            let description = if !line_accounts.is_empty() {
-                line_accounts.join(", ")
-            } else if !check_memo.is_empty() {
-                check_memo
-            } else {
-                "Disbursement / Payment".to_string()
-            };
+            // Add Bank Account as Credit line
+            credit_lines.push((bank_account, gross_amount));
 
-            let gross_amount = ((total_check_amt) * 100.0).round() / 100.0;
-            let withholding_tax = 0.0;
-            let net_disbursement = gross_amount;
+            // Balance Debits and Credits if needed (e.g. tax or currency rounding)
+            let sum_debits: f64 = debit_lines.iter().map(|(_, a)| *a).sum();
+            let sum_credits: f64 = credit_lines.iter().map(|(_, a)| *a).sum();
+            let diff = ((sum_credits - sum_debits) * 100.0).round() / 100.0;
+            if diff.abs() > 0.009 && !debit_lines.is_empty() {
+                debit_lines[0].1 = ((debit_lines[0].1 + diff) * 100.0).round() / 100.0;
+            }
 
-            entries.push(CashDisbursementsJournalEntry {
-                id: None,
-                period_ended: period_ended.to_string(),
-                txn_date,
-                payee_name,
-                check_no,
-                description,
-                gross_amount,
-                withholding_tax,
-                net_disbursement,
-                qb_txn_id: txn_id,
-                synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
-            });
+            // Emit Debit rows first
+            for (idx, (acct_name, amt)) in debit_lines.into_iter().enumerate() {
+                entries.push(CashDisbursementsJournalEntry {
+                    id: None,
+                    period_ended: period_ended.to_string(),
+                    txn_date: txn_date.clone(),
+                    payee_name: payee_name.clone(),
+                    check_no: check_no.clone(),
+                    description: acct_name,
+                    gross_amount: if idx == 0 { gross_amount } else { 0.0 },
+                    withholding_tax: 0.0,
+                    net_disbursement: if idx == 0 { gross_amount } else { 0.0 },
+                    debit: amt,
+                    credit: 0.0,
+                    qb_txn_id: txn_id.clone(),
+                    synced_at: Some(now_str.clone()),
+                });
+            }
+
+            // Emit Credit rows next
+            for (acct_name, amt) in credit_lines {
+                entries.push(CashDisbursementsJournalEntry {
+                    id: None,
+                    period_ended: period_ended.to_string(),
+                    txn_date: txn_date.clone(),
+                    payee_name: payee_name.clone(),
+                    check_no: check_no.clone(),
+                    description: acct_name,
+                    gross_amount: 0.0,
+                    withholding_tax: 0.0,
+                    net_disbursement: 0.0,
+                    debit: 0.0,
+                    credit: amt,
+                    qb_txn_id: txn_id.clone(),
+                    synced_at: Some(now_str.clone()),
+                });
+            }
         }
 
         // 2. Bill Payment Checks (<BillPaymentCheckRet>)
@@ -2094,34 +2192,49 @@ impl QbXmlParser {
 
             let ap_account = Self::extract_nested_tag(item_xml, "APAccountRef", "FullName")
                 .map(|s| Self::clean_qb_text(&s))
+                .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "Accounts Payable".to_string());
 
-            let check_memo = Self::extract_tag_value(item_xml, "Memo").unwrap_or_default();
-
-            let description = if !ap_account.is_empty() {
-                ap_account
-            } else if !check_memo.is_empty() {
-                check_memo
-            } else {
-                "Accounts Payable".to_string()
-            };
+            let bank_account = Self::extract_nested_tag(item_xml, "BankAccountRef", "FullName")
+                .or_else(|| Self::extract_nested_tag(item_xml, "AccountRef", "FullName"))
+                .map(|s| Self::clean_qb_text(&s))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "Cash in Bank".to_string());
 
             let gross_amount = ((check_amt) * 100.0).round() / 100.0;
-            let withholding_tax = 0.0;
-            let net_disbursement = gross_amount;
 
+            // Debit Line: APAccountRef (Accounts Payable)
+            entries.push(CashDisbursementsJournalEntry {
+                id: None,
+                period_ended: period_ended.to_string(),
+                txn_date: txn_date.clone(),
+                payee_name: payee_name.clone(),
+                check_no: check_no.clone(),
+                description: ap_account,
+                gross_amount,
+                withholding_tax: 0.0,
+                net_disbursement: gross_amount,
+                debit: gross_amount,
+                credit: 0.0,
+                qb_txn_id: txn_id.clone(),
+                synced_at: Some(now_str.clone()),
+            });
+
+            // Credit Line: BankAccountRef (Cash in Bank)
             entries.push(CashDisbursementsJournalEntry {
                 id: None,
                 period_ended: period_ended.to_string(),
                 txn_date,
                 payee_name,
                 check_no,
-                description,
-                gross_amount,
-                withholding_tax,
-                net_disbursement,
+                description: bank_account,
+                gross_amount: 0.0,
+                withholding_tax: 0.0,
+                net_disbursement: 0.0,
+                debit: 0.0,
+                credit: gross_amount,
                 qb_txn_id: txn_id,
-                synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+                synced_at: Some(now_str.clone()),
             });
         }
 
@@ -2752,7 +2865,24 @@ impl QbXmlParser {
                 txn_date: "02/10/2023".to_string(),
                 payee_name: "Petron Fuel Corporation".to_string(),
                 check_no: "CHK-0044921".to_string(),
-                description: "Payment for Fuel Bill 2023-089".to_string(),
+                description: "Accounts Payable".to_string(),
+                debit: 137500.00,
+                credit: 0.0,
+                gross_amount: 140000.00,
+                withholding_tax: 2500.00,
+                net_disbursement: 137500.00,
+                qb_txn_id: Some("QB-CHK-4001".to_string()),
+                synced_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+            },
+            CashDisbursementsJournalEntry {
+                id: Some(2),
+                period_ended: period.to_string(),
+                txn_date: "02/10/2023".to_string(),
+                payee_name: "Petron Fuel Corporation".to_string(),
+                check_no: "CHK-0044921".to_string(),
+                description: "Cash in Bank".to_string(),
+                debit: 0.0,
+                credit: 137500.00,
                 gross_amount: 140000.00,
                 withholding_tax: 2500.00,
                 net_disbursement: 137500.00,
