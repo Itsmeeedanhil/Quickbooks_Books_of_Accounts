@@ -274,6 +274,102 @@
     white-space: nowrap !important;
   }
 
+  /* Purchase Journal 9-Column Specific Print Widths */
+  table.purchase-journal-table th:nth-child(1),
+  table.purchase-journal-table td:nth-child(1) { width: 7.5% !important; }
+  table.purchase-journal-table th:nth-child(2),
+  table.purchase-journal-table td:nth-child(2) { width: 10.5% !important; }
+  table.purchase-journal-table th:nth-child(3),
+  table.purchase-journal-table td:nth-child(3) { width: 16% !important; }
+  table.purchase-journal-table th:nth-child(4),
+  table.purchase-journal-table td:nth-child(4) { width: 16% !important; }
+  table.purchase-journal-table th:nth-child(5),
+  table.purchase-journal-table td:nth-child(5) { width: 17% !important; }
+  table.purchase-journal-table th:nth-child(6),
+  table.purchase-journal-table td:nth-child(6) { width: 8% !important; }
+  table.purchase-journal-table th:nth-child(7),
+  table.purchase-journal-table td:nth-child(7) { width: 8.5% !important; }
+  table.purchase-journal-table th:nth-child(8),
+  table.purchase-journal-table td:nth-child(8) { width: 8% !important; }
+  table.purchase-journal-table th:nth-child(9),
+  table.purchase-journal-table td:nth-child(9) { width: 8.5% !important; }
+
+  table.purchase-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(7):not([colspan]),
+  table.purchase-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(8):not([colspan]),
+  table.purchase-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(9):not([colspan]) {
+    text-align: right !important;
+    white-space: nowrap !important;
+  }
+
+  /* Cash Receipts 7-Column Specific Print Widths & Alignments */
+  table.cash-receipts-table th:nth-child(1),
+  table.cash-receipts-table td:nth-child(1) { width: 8.5% !important; }
+  table.cash-receipts-table th:nth-child(2),
+  table.cash-receipts-table td:nth-child(2) { width: 11.5% !important; }
+  table.cash-receipts-table th:nth-child(3),
+  table.cash-receipts-table td:nth-child(3) { width: 24% !important; }
+  table.cash-receipts-table th:nth-child(4),
+  table.cash-receipts-table td:nth-child(4) { width: 9% !important; }
+  table.cash-receipts-table th:nth-child(5),
+  table.cash-receipts-table td:nth-child(5) { width: 25% !important; }
+  table.cash-receipts-table th:nth-child(6),
+  table.cash-receipts-table td:nth-child(6) { width: 11% !important; }
+  table.cash-receipts-table th:nth-child(7),
+  table.cash-receipts-table td:nth-child(7) { width: 11% !important; }
+
+  table.cash-receipts-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(1):not([colspan]) { text-align: center !important; white-space: nowrap !important; }
+  table.cash-receipts-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(2):not([colspan]) { text-align: center !important; white-space: nowrap !important; }
+  table.cash-receipts-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(3):not([colspan]) { text-align: left !important; white-space: normal !important; word-break: break-word !important; overflow-wrap: anywhere !important; }
+  table.cash-receipts-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(4):not([colspan]) { text-align: center !important; white-space: nowrap !important; }
+  table.cash-receipts-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(5):not([colspan]) { text-align: left !important; white-space: normal !important; word-break: break-word !important; }
+  table.cash-receipts-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(6):not([colspan]) { text-align: right !important; white-space: nowrap !important; }
+  table.cash-receipts-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(7):not([colspan]) { text-align: right !important; white-space: nowrap !important; }
+
+  /* Cash Disbursements 6-Column Specific Print Widths & Alignments (Auto-fit Payee Name) */
+  table.cash-disbursements-table th:nth-child(1),
+  table.cash-disbursements-table td:nth-child(1) { width: 9% !important; }
+  table.cash-disbursements-table th:nth-child(2),
+  table.cash-disbursements-table td:nth-child(2) { width: 28% !important; }
+  table.cash-disbursements-table th:nth-child(3),
+  table.cash-disbursements-table td:nth-child(3) { width: 9% !important; }
+  table.cash-disbursements-table th:nth-child(4),
+  table.cash-disbursements-table td:nth-child(4) { width: 30% !important; }
+  table.cash-disbursements-table th:nth-child(5),
+  table.cash-disbursements-table td:nth-child(5) { width: 12% !important; }
+  table.cash-disbursements-table th:nth-child(6),
+  table.cash-disbursements-table td:nth-child(6) { width: 12% !important; }
+
+  table.cash-disbursements-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(1):not([colspan]) { text-align: center !important; white-space: nowrap !important; }
+  table.cash-disbursements-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(2):not([colspan]) { text-align: left !important; white-space: normal !important; word-break: break-word !important; overflow-wrap: anywhere !important; font-size: 5.8pt !important; }
+  table.cash-disbursements-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(3):not([colspan]) { text-align: center !important; white-space: nowrap !important; }
+  table.cash-disbursements-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(4):not([colspan]) { text-align: left !important; white-space: normal !important; word-break: break-word !important; overflow-wrap: anywhere !important; }
+  table.cash-disbursements-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(5):not([colspan]) { text-align: right !important; white-space: nowrap !important; }
+  table.cash-disbursements-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(6):not([colspan]) { text-align: right !important; white-space: nowrap !important; }
+
+  /* General Journal 7-Column Specific Print Widths & Alignments */
+  table.general-journal-table th:nth-child(1),
+  table.general-journal-table td:nth-child(1) { width: 8% !important; }
+  table.general-journal-table th:nth-child(2),
+  table.general-journal-table td:nth-child(2) { width: 8% !important; }
+  table.general-journal-table th:nth-child(3),
+  table.general-journal-table td:nth-child(3) { width: 9% !important; }
+  table.general-journal-table th:nth-child(4),
+  table.general-journal-table td:nth-child(4) { width: 25% !important; }
+  table.general-journal-table th:nth-child(5),
+  table.general-journal-table td:nth-child(5) { width: 11% !important; }
+  table.general-journal-table th:nth-child(6),
+  table.general-journal-table td:nth-child(6) { width: 11% !important; }
+  table.general-journal-table th:nth-child(7),
+  table.general-journal-table td:nth-child(7) { width: 28% !important; }
+
+  table.general-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(1):not([colspan]) { text-align: center !important; white-space: nowrap !important; }
+  table.general-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(2):not([colspan]) { text-align: center !important; white-space: nowrap !important; }
+  table.general-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(3):not([colspan]) { text-align: center !important; white-space: nowrap !important; }
+  table.general-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(4):not([colspan]) { text-align: left !important; white-space: normal !important; word-break: break-word !important; }
+  table.general-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(5):not([colspan]) { text-align: right !important; white-space: nowrap !important; }
+  table.general-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(6):not([colspan]) { text-align: right !important; white-space: nowrap !important; }
+  table.general-journal-table tbody tr:not(.account-header-row):not(.account-subtotal-row) td:nth-child(7):not([colspan]) { text-align: left !important; white-space: normal !important; word-break: break-word !important; }
+
   /* General Ledger 8-Column Specific Print Widths */
   table.general-ledger-table th:nth-child(1),
   table.general-ledger-table td:nth-child(1) { width: 12% !important; }

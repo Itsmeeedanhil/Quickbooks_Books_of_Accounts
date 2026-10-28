@@ -67,7 +67,7 @@ export const PurchaseJournalView = ({
 
       <div className="w-full px-6 py-3 bg-white">
         <div className="w-full overflow-x-auto border border-slate-700 bg-white">
-          <table className="w-full text-xs border-collapse">
+          <table className="w-full text-xs border-collapse purchase-journal-table">
             <thead>
               <tr className="bg-slate-50 text-slate-900 border-b border-slate-700 font-bold text-center divide-x divide-slate-400">
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[75px]">Date</th>
@@ -194,7 +194,7 @@ export const CashReceiptsJournalView = ({
 
       <div className="w-full px-6 py-3 bg-white">
         <div className="w-full overflow-x-auto border border-slate-700 bg-white">
-          <table className="w-full text-xs border-collapse">
+          <table className="w-full text-xs border-collapse cash-receipts-table">
             <thead>
               <tr className="bg-slate-50 text-slate-900 border-b border-slate-700 font-bold text-center divide-x divide-slate-400">
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[75px]">Date</th>
@@ -338,7 +338,7 @@ export const CashDisbursementsJournalView = ({
 
       <div className="w-full px-6 py-3 bg-white">
         <div className="w-full overflow-x-auto border border-slate-700 bg-white">
-          <table className="w-full text-xs border-collapse">
+          <table className="w-full text-xs border-collapse cash-disbursements-table">
             <thead>
               <tr className="bg-slate-50 text-slate-900 border-b border-slate-700 font-bold text-center divide-x divide-slate-400">
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[75px]">Date</th>
@@ -479,7 +479,7 @@ export const GeneralJournalView = ({
 
       <div className="w-full px-6 py-3 bg-white">
         <div className="w-full overflow-x-auto border border-slate-700 bg-white">
-          <table className="w-full text-xs border-collapse">
+          <table className="w-full text-xs border-collapse general-journal-table">
             <thead>
               <tr className="bg-slate-50 text-slate-900 border-b border-slate-700 font-bold text-center divide-x divide-slate-400">
                 <th className="py-2 px-2 text-center whitespace-nowrap min-w-[75px]">Date</th>
